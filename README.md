@@ -26,7 +26,7 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 Requires Xcode 15+ and macOS 13+.
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/Preview3MF.git
+git clone https://github.com/cavoco/Preview3MF.git
 cd Preview3MF
 xcodebuild -scheme Preview3MF -configuration Release build
 ```
