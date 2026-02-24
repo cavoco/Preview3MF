@@ -8,15 +8,27 @@ final class SceneBuilder {
 
         let geometry = buildGeometry(from: mesh)
         let modelNode = SCNNode(geometry: geometry)
-        scene.rootNode.addChildNode(modelNode)
 
-        // Compute bounding box for camera framing
+        // Compute bounding box, then re-center the model at the origin
         let (bbMin, bbMax) = modelNode.boundingBox
         let center = SCNVector3(
             (bbMin.x + bbMax.x) / 2,
             (bbMin.y + bbMax.y) / 2,
             (bbMin.z + bbMax.z) / 2
         )
+        modelNode.position = SCNVector3(-center.x, -center.y, -center.z)
+
+        // Pivot node sits at origin so rotation spins the model around its center
+        let pivotNode = SCNNode()
+        pivotNode.addChildNode(modelNode)
+        scene.rootNode.addChildNode(pivotNode)
+
+        // Continuous rotation around the vertical (Y) axis
+        let spin = SCNAction.repeatForever(
+            SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 12)
+        )
+        pivotNode.runAction(spin)
+
         let extents = SCNVector3(
             bbMax.x - bbMin.x,
             bbMax.y - bbMin.y,
@@ -31,11 +43,11 @@ final class SceneBuilder {
         cameraNode.camera = camera
         let distance = CGFloat(maxExtent) * 1.8
         cameraNode.position = SCNVector3(
-            center.x + distance * 0.5,
-            center.y + distance * 0.5,
-            center.z + distance
+            distance * 0.5,
+            distance * 0.5,
+            distance
         )
-        cameraNode.look(at: center)
+        cameraNode.look(at: SCNVector3Zero)
         scene.rootNode.addChildNode(cameraNode)
 
         // Key light
@@ -45,12 +57,8 @@ final class SceneBuilder {
         keyLight.color = NSColor.white
         let keyNode = SCNNode()
         keyNode.light = keyLight
-        keyNode.position = SCNVector3(
-            center.x + distance,
-            center.y + distance * 1.5,
-            center.z + distance
-        )
-        keyNode.look(at: center)
+        keyNode.position = SCNVector3(distance, distance * 1.5, distance)
+        keyNode.look(at: SCNVector3Zero)
         scene.rootNode.addChildNode(keyNode)
 
         // Fill light
@@ -60,12 +68,8 @@ final class SceneBuilder {
         fillLight.color = NSColor.white
         let fillNode = SCNNode()
         fillNode.light = fillLight
-        fillNode.position = SCNVector3(
-            center.x - distance,
-            center.y + distance * 0.5,
-            center.z - distance * 0.5
-        )
-        fillNode.look(at: center)
+        fillNode.position = SCNVector3(-distance, distance * 0.5, -distance * 0.5)
+        fillNode.look(at: SCNVector3Zero)
         scene.rootNode.addChildNode(fillNode)
 
         // Ambient light
