@@ -12,9 +12,26 @@ struct ContentView: View {
             Text("Preview3MF")
                 .font(.largeTitle.bold())
 
-            Text("Quick Look extension for .3mf files is installed.\nSelect a .3mf file in Finder and press Space to preview.")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Quick Look extension is installed")
+                        .font(.headline)
+                }
+                
+                Text("Select a .3mf file in Finder and press Space to preview.")
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+                
+                Button("Open System Extensions Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preferences.extensions?Quick Look") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
 
             Divider()
 

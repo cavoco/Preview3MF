@@ -26,26 +26,31 @@
       "size" : "128x128"
     },
     {
+      "filename" : "3mf-256 1.png",
       "idiom" : "mac",
       "scale" : "2x",
       "size" : "128x128"
     },
     {
+      "filename" : "3mf-256 2.png",
       "idiom" : "mac",
       "scale" : "1x",
       "size" : "256x256"
     },
     {
+      "filename" : "3mf-512 1.png",
       "idiom" : "mac",
       "scale" : "2x",
       "size" : "256x256"
     },
     {
+      "filename" : "3mf-512 2.png",
       "idiom" : "mac",
       "scale" : "1x",
       "size" : "512x512"
     },
     {
+      "filename" : "3mf.png",
       "idiom" : "mac",
       "scale" : "2x",
       "size" : "512x512"
