@@ -5,6 +5,9 @@ import ZIPFoundation
 struct MeshData {
     var vertices: [SIMD3<Float>]
     var triangles: [(UInt32, UInt32, UInt32)]
+    /// Per-triangle vertex colors (one RGBA tuple per triangle, three colors per vertex).
+    /// `nil` means no color data — use default gray.
+    var triangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
 }
 
 enum ThreeMFParserError: Error, LocalizedError {
@@ -55,6 +58,8 @@ final class ThreeMFParser {
         // Parse all model files, merging vertices/triangles per-object to keep indices correct
         var allVertices: [SIMD3<Float>] = []
         var allTriangles: [(UInt32, UInt32, UInt32)] = []
+        var allTriangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
+        let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
 
         for entry in modelEntries {
             var xmlData = Data()
@@ -75,13 +80,31 @@ final class ThreeMFParser {
             for tri in delegate.triangles {
                 allTriangles.append((tri.0 + vertexOffset, tri.1 + vertexOffset, tri.2 + vertexOffset))
             }
+
+            // Merge color data
+            if let colors = delegate.triangleColors {
+                if allTriangleColors == nil {
+                    // Backfill previous triangles with default gray
+                    let previousCount = allTriangles.count - delegate.triangles.count
+                    if previousCount > 0 {
+                        allTriangleColors = Array(repeating: (defaultGray, defaultGray, defaultGray), count: previousCount)
+                    } else {
+                        allTriangleColors = []
+                    }
+                }
+                allTriangleColors!.append(contentsOf: colors)
+            } else if allTriangleColors != nil {
+                // This file has no colors but previous files did — fill with default gray
+                let grayFill = Array(repeating: (defaultGray, defaultGray, defaultGray), count: delegate.triangles.count)
+                allTriangleColors!.append(contentsOf: grayFill)
+            }
         }
 
         guard !allVertices.isEmpty else {
             throw ThreeMFParserError.parsingFailed("No mesh data found in any model file")
         }
 
-        return MeshData(vertices: allVertices, triangles: allTriangles)
+        return MeshData(vertices: allVertices, triangles: allTriangles, triangleColors: allTriangleColors)
     }
 
     // MARK: - ZIP64 patching
@@ -194,6 +217,7 @@ final class ThreeMFParser {
 
     private static func findSignature(_ data: Data, sig: [UInt8]) -> Int? {
         for i in stride(from: data.count - 4, through: 0, by: -1) {
+          
             if data[i] == sig[0], data[i+1] == sig[1], data[i+2] == sig[2], data[i+3] == sig[3] {
                 return i
             }
@@ -216,9 +240,21 @@ final class ThreeMFParser {
 
 // MARK: - XML Parsing
 
-private final class ModelXMLDelegate: NSObject, XMLParserDelegate {
+final class ModelXMLDelegate: NSObject, XMLParserDelegate {
     var vertices: [SIMD3<Float>] = []
     var triangles: [(UInt32, UInt32, UInt32)] = []
+    var triangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
+
+    // Material groups: keyed by basematerials group id
+    private var materialGroups: [Int: [SIMD4<Float>]] = [:]
+    private var currentGroupID: Int?
+    private var currentGroupColors: [SIMD4<Float>] = []
+
+    // Object-level default material
+    private var objectPID: Int?
+    private var objectPIndex: Int?
+
+    private let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
 
     func parser(
         _ parser: XMLParser,
@@ -228,6 +264,26 @@ private final class ModelXMLDelegate: NSObject, XMLParserDelegate {
         attributes: [String: String]
     ) {
         switch elementName {
+        case "basematerials":
+            if let idStr = attributes["id"], let id = Int(idStr) {
+                currentGroupID = id
+                currentGroupColors = []
+            }
+
+        case "base":
+            if let colorStr = attributes["displaycolor"],
+               let color = Self.parseDisplayColor(colorStr) {
+                currentGroupColors.append(color)
+            }
+
+        case "object":
+            if let pidStr = attributes["pid"], let pid = Int(pidStr) {
+                objectPID = pid
+            }
+            if let pindexStr = attributes["pindex"], let pindex = Int(pindexStr) {
+                objectPIndex = pindex
+            }
+
         case "vertex":
             guard
                 let xStr = attributes["x"], let x = Float(xStr),
@@ -244,8 +300,83 @@ private final class ModelXMLDelegate: NSObject, XMLParserDelegate {
             else { return }
             triangles.append((v1, v2, v3))
 
+            // Only track colors if this file has material definitions
+            guard !materialGroups.isEmpty else { break }
+
+            // Backfill previous triangles with default gray if this is the first color entry
+            if triangleColors == nil {
+                triangleColors = Array(repeating: (defaultGray, defaultGray, defaultGray),
+                                       count: triangles.count - 1)
+            }
+
+            // Resolve colors for this triangle
+            let triPID = attributes["pid"].flatMap { Int($0) } ?? objectPID
+            let c0: SIMD4<Float>
+            let c1: SIMD4<Float>
+            let c2: SIMD4<Float>
+
+            if let pid = triPID, let group = materialGroups[pid] {
+                let p1 = attributes["p1"].flatMap { Int($0) } ?? objectPIndex
+                let p2 = attributes["p2"].flatMap { Int($0) } ?? p1
+                let p3 = attributes["p3"].flatMap { Int($0) } ?? p1
+
+                c0 = (p1 != nil && p1! < group.count) ? group[p1!] : defaultGray
+                c1 = (p2 != nil && p2! < group.count) ? group[p2!] : defaultGray
+                c2 = (p3 != nil && p3! < group.count) ? group[p3!] : defaultGray
+            } else {
+                c0 = defaultGray
+                c1 = defaultGray
+                c2 = defaultGray
+            }
+
+            triangleColors!.append((c0, c1, c2))
+
         default:
             break
+        }
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName: String?
+    ) {
+        switch elementName {
+        case "basematerials":
+            if let id = currentGroupID {
+                materialGroups[id] = currentGroupColors
+            }
+            currentGroupID = nil
+            currentGroupColors = []
+
+        case "object":
+            objectPID = nil
+            objectPIndex = nil
+
+        default:
+            break
+        }
+    }
+
+    /// Parse a `#RRGGBB` or `#RRGGBBAA` hex color string into RGBA floats.
+    static func parseDisplayColor(_ hex: String) -> SIMD4<Float>? {
+        var str = hex
+        if str.hasPrefix("#") { str.removeFirst() }
+        guard str.count == 6 || str.count == 8 else { return nil }
+        guard let value = UInt64(str, radix: 16) else { return nil }
+
+        if str.count == 6 {
+            let r = Float((value >> 16) & 0xFF) / 255.0
+            let g = Float((value >> 8) & 0xFF) / 255.0
+            let b = Float(value & 0xFF) / 255.0
+            return SIMD4(r, g, b, 1.0)
+        } else {
+            let r = Float((value >> 24) & 0xFF) / 255.0
+            let g = Float((value >> 16) & 0xFF) / 255.0
+            let b = Float((value >> 8) & 0xFF) / 255.0
+            let a = Float(value & 0xFF) / 255.0
+            return SIMD4(r, g, b, a)
         }
     }
 }

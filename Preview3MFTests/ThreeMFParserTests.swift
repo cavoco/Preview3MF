@@ -125,6 +125,43 @@ final class ThreeMFParserTests: XCTestCase {
         return Data(xml.utf8)
     }
 
+    private func makeColorModelXML(
+        colors: [(String)],
+        vertices: [SIMD3<Float>],
+        triangles: [(v1: Int, v2: Int, v3: Int, pid: Int?, p1: Int?, p2: Int?, p3: Int?)],
+        objectPID: Int? = nil,
+        objectPIndex: Int? = nil
+    ) -> Data {
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        xml += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">"
+        xml += "<resources>"
+        xml += "<basematerials id=\"1\">"
+        for color in colors {
+            xml += "<base displaycolor=\"\(color)\"/>"
+        }
+        xml += "</basematerials>"
+
+        var objAttrs = "id=\"2\" type=\"model\""
+        if let pid = objectPID { objAttrs += " pid=\"\(pid)\"" }
+        if let pindex = objectPIndex { objAttrs += " pindex=\"\(pindex)\"" }
+        xml += "<object \(objAttrs)><mesh><vertices>"
+        for v in vertices {
+            xml += "<vertex x=\"\(v.x)\" y=\"\(v.y)\" z=\"\(v.z)\"/>"
+        }
+        xml += "</vertices><triangles>"
+        for t in triangles {
+            var triAttrs = "v1=\"\(t.v1)\" v2=\"\(t.v2)\" v3=\"\(t.v3)\""
+            if let pid = t.pid { triAttrs += " pid=\"\(pid)\"" }
+            if let p1 = t.p1 { triAttrs += " p1=\"\(p1)\"" }
+            if let p2 = t.p2 { triAttrs += " p2=\"\(p2)\"" }
+            if let p3 = t.p3 { triAttrs += " p3=\"\(p3)\"" }
+            xml += "<triangle \(triAttrs)/>"
+        }
+        xml += "</triangles></mesh></object></resources>"
+        xml += "<build><item objectid=\"2\"/></build></model>"
+        return Data(xml.utf8)
+    }
+
     private func makeMultiObjectModelXML(
         objects: [(vertices: [SIMD3<Float>], triangles: [(Int, Int, Int)])]
     ) -> Data {
@@ -307,5 +344,125 @@ final class ThreeMFParserTests: XCTestCase {
                 XCTFail("Expected parsingFailed, got \(parserError)")
             }
         }
+    }
+
+    // MARK: - Color Parsing Tests
+
+    func testParseWithColors() throws {
+        let xml = makeColorModelXML(
+            colors: ["#FF0000", "#00FF00"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: 1, p1: 0, p2: 0, p3: 0)]
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let mesh = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertNotNil(mesh.triangleColors)
+        XCTAssertEqual(mesh.triangleColors?.count, 1)
+
+        let (c0, c1, c2) = mesh.triangleColors![0]
+        // All three vertices should be red (#FF0000)
+        XCTAssertEqual(c0.x, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.y, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.z, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c1, c0)
+        XCTAssertEqual(c2, c0)
+    }
+
+    func testParseObjectDefaultColor() throws {
+        // Object has pid=1 pindex=1 (green), triangles inherit it
+        let xml = makeColorModelXML(
+            colors: ["#FF0000", "#00FF00"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: nil, p1: nil, p2: nil, p3: nil)],
+            objectPID: 1,
+            objectPIndex: 1
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let mesh = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertNotNil(mesh.triangleColors)
+        let (c0, _, _) = mesh.triangleColors![0]
+        // pindex=1 → green
+        XCTAssertEqual(c0.x, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.y, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.z, 0.0, accuracy: 1e-3)
+    }
+
+    func testParsePerTriangleColorOverride() throws {
+        // Object default is red (pindex=0), but triangle overrides with green (p1=1)
+        let xml = makeColorModelXML(
+            colors: ["#FF0000", "#00FF00"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: 1, p1: 1, p2: 1, p3: 1)],
+            objectPID: 1,
+            objectPIndex: 0
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let mesh = try ThreeMFParser.parse(fileAt: url)
+        let (c0, c1, c2) = mesh.triangleColors![0]
+        // Override: all green
+        XCTAssertEqual(c0.x, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.y, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c1, c0)
+        XCTAssertEqual(c2, c0)
+    }
+
+    func testParseVertexColorInterpolation() throws {
+        // p1=0 (red), p2=1 (green), p3=2 (blue) — three different colors per vertex
+        let xml = makeColorModelXML(
+            colors: ["#FF0000", "#00FF00", "#0000FF"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: 1, p1: 0, p2: 1, p3: 2)]
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let mesh = try ThreeMFParser.parse(fileAt: url)
+        let (c0, c1, c2) = mesh.triangleColors![0]
+        // Vertex 0: red
+        XCTAssertEqual(c0.x, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.y, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.z, 0.0, accuracy: 1e-3)
+        // Vertex 1: green
+        XCTAssertEqual(c1.x, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c1.y, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c1.z, 0.0, accuracy: 1e-3)
+        // Vertex 2: blue
+        XCTAssertEqual(c2.x, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c2.y, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c2.z, 1.0, accuracy: 1e-3)
+    }
+
+    func testParseNoColorsMeansNil() throws {
+        // Standard model without any basematerials → triangleColors should be nil
+        let xml = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let mesh = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertNil(mesh.triangleColors)
     }
 }

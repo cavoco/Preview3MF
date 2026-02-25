@@ -86,14 +86,16 @@ final class SceneBuilder {
 
     // MARK: - Geometry
 
-    private static func buildGeometry(from mesh: MeshData) -> SCNGeometry {
+    static func buildGeometry(from mesh: MeshData) -> SCNGeometry {
         let vertices = mesh.vertices
         let triangles = mesh.triangles
 
         // Build per-face vertices with normals for flat shading
         var faceVertices: [SCNVector3] = []
         var faceNormals: [SCNVector3] = []
+        var faceColors: [Float] = []
         var indices: [UInt32] = []
+        let hasColors = mesh.triangleColors != nil
 
         for (i, tri) in triangles.enumerated() {
             let v0 = vertices[Int(tri.0)]
@@ -116,6 +118,13 @@ final class SceneBuilder {
             indices.append(baseIndex)
             indices.append(baseIndex + 1)
             indices.append(baseIndex + 2)
+
+            if let colors = mesh.triangleColors {
+                let (c0, c1, c2) = colors[i]
+                faceColors.append(contentsOf: [c0.x, c0.y, c0.z, c0.w])
+                faceColors.append(contentsOf: [c1.x, c1.y, c1.z, c1.w])
+                faceColors.append(contentsOf: [c2.x, c2.y, c2.z, c2.w])
+            }
         }
 
         let vertexSource = SCNGeometrySource(
@@ -129,11 +138,31 @@ final class SceneBuilder {
             primitiveType: .triangles
         )
 
-        let geometry = SCNGeometry(sources: [vertexSource, normalSource], elements: [element])
+        var sources = [vertexSource, normalSource]
 
-        // Neutral material
+        if hasColors {
+            let colorData = Data(bytes: faceColors, count: faceColors.count * MemoryLayout<Float>.size)
+            let colorSource = SCNGeometrySource(
+                data: colorData,
+                semantic: .color,
+                vectorCount: faceVertices.count,
+                usesFloatComponents: true,
+                componentsPerVector: 4,
+                bytesPerComponent: MemoryLayout<Float>.size,
+                dataOffset: 0,
+                dataStride: MemoryLayout<Float>.size * 4
+            )
+            sources.append(colorSource)
+        }
+
+        let geometry = SCNGeometry(sources: sources, elements: [element])
+
         let material = SCNMaterial()
-        material.diffuse.contents = NSColor(white: 0.75, alpha: 1.0)
+        if hasColors {
+            material.diffuse.contents = NSColor.white
+        } else {
+            material.diffuse.contents = NSColor(white: 0.75, alpha: 1.0)
+        }
         material.specular.contents = NSColor.white
         material.shininess = 25
         material.lightingModel = .phong

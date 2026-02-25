@@ -233,4 +233,47 @@ final class SceneBuilderTests: XCTestCase {
                                           "Specular contents should be an NSColor")
         XCTAssertEqual(specularColor.whiteComponent, 1.0, accuracy: 0.01)
     }
+
+    // MARK: - Color Tests
+
+    private func makeColoredTriangleMesh() -> MeshData {
+        let red = SIMD4<Float>(1, 0, 0, 1)
+        return MeshData(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)],
+            triangleColors: [(red, red, red)]
+        )
+    }
+
+    func testColoredGeometryHasColorSource() throws {
+        let scene = SceneBuilder.buildScene(from: makeColoredTriangleMesh())
+        let modelNode = try findModelNode(in: scene)
+        let geometry = try XCTUnwrap(modelNode.geometry)
+
+        let colorSource = geometry.sources.first { $0.semantic == .color }
+        XCTAssertNotNil(colorSource, "Geometry should have a color source when triangleColors is present")
+        XCTAssertEqual(colorSource?.vectorCount, 3)
+        XCTAssertEqual(colorSource?.componentsPerVector, 4)
+    }
+
+    func testUncoloredGeometryHasNoColorSource() throws {
+        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
+        let modelNode = try findModelNode(in: scene)
+        let geometry = try XCTUnwrap(modelNode.geometry)
+
+        let colorSource = geometry.sources.first { $0.semantic == .color }
+        XCTAssertNil(colorSource, "Geometry should not have a color source when triangleColors is nil")
+    }
+
+    func testColoredMaterialDiffuseIsWhite() throws {
+        let scene = SceneBuilder.buildScene(from: makeColoredTriangleMesh())
+        let modelNode = try findModelNode(in: scene)
+        let geometry = try XCTUnwrap(modelNode.geometry)
+        let material = try XCTUnwrap(geometry.materials.first)
+
+        let diffuseColor = try XCTUnwrap(material.diffuse.contents as? NSColor,
+                                         "Diffuse contents should be an NSColor")
+        XCTAssertEqual(diffuseColor.whiteComponent, 1.0, accuracy: 0.01,
+                       "Diffuse should be white when vertex colors are used")
+    }
 }
