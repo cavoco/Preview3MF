@@ -20,6 +20,11 @@
 		A100000011 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A500000002 /* ZIPFoundation */; };
 		A100000020 /* ThreeMFParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000030 /* ThreeMFParserTests.swift */; };
 		A100000021 /* SceneBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000031 /* SceneBuilderTests.swift */; };
+		A100000030 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000040 /* ThumbnailProvider.swift */; };
+		A100000031 /* ThreeMFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000010 /* ThreeMFParser.swift */; };
+		A100000032 /* SceneBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000011 /* SceneBuilder.swift */; };
+		A100000033 /* ThumbnailExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A300000007 /* ThumbnailExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A100000034 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A500000004 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -37,6 +42,13 @@
 			remoteGlobalIDString = A300000004;
 			remoteInfo = Preview3MF;
 		};
+		A600000005 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A400000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A300000008;
+			remoteInfo = ThumbnailExtension;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -47,6 +59,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				A100000009 /* PreviewExtension.appex in Embed Foundation Extensions */,
+				A100000033 /* ThumbnailExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -66,9 +79,13 @@
 		A200000022 /* PreviewExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PreviewExtension.entitlements; sourceTree = "<group>"; };
 		A200000030 /* ThreeMFParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreeMFParserTests.swift; sourceTree = "<group>"; };
 		A200000031 /* SceneBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneBuilderTests.swift; sourceTree = "<group>"; };
+		A200000040 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
+		A200000041 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A200000042 /* ThumbnailExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ThumbnailExtension.entitlements; sourceTree = "<group>"; };
 		A300000001 /* Preview3MF.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Preview3MF.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A300000002 /* PreviewExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PreviewExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A300000005 /* Preview3MFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Preview3MFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A300000007 /* ThumbnailExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThumbnailExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +112,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A800000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000034 /* ZIPFoundation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -103,6 +128,7 @@
 			children = (
 				A900000002 /* Preview3MF */,
 				A900000003 /* PreviewExtension */,
+				A900000007 /* ThumbnailExtension */,
 				A900000004 /* Shared */,
 				A900000006 /* Preview3MFTests */,
 				A900000005 /* Products */,
@@ -145,6 +171,7 @@
 			children = (
 				A300000001 /* Preview3MF.app */,
 				A300000002 /* PreviewExtension.appex */,
+				A300000007 /* ThumbnailExtension.appex */,
 				A300000005 /* Preview3MFTests.xctest */,
 			);
 			name = Products;
@@ -157,6 +184,16 @@
 				A200000031 /* SceneBuilderTests.swift */,
 			);
 			path = Preview3MFTests;
+			sourceTree = "<group>";
+		};
+		A900000007 /* ThumbnailExtension */ = {
+			isa = PBXGroup;
+			children = (
+				A200000040 /* ThumbnailProvider.swift */,
+				A200000041 /* Info.plist */,
+				A200000042 /* ThumbnailExtension.entitlements */,
+			);
+			path = ThumbnailExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -194,6 +231,7 @@
 			);
 			dependencies = (
 				A600000002 /* PBXTargetDependency */,
+				A600000006 /* PBXTargetDependency */,
 			);
 			name = Preview3MF;
 			packageProductDependencies = (
@@ -220,6 +258,25 @@
 			productReference = A300000005 /* Preview3MFTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		A300000008 /* ThumbnailExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB00000005 /* Build configuration list for PBXNativeTarget "ThumbnailExtension" */;
+			buildPhases = (
+				AA00000005 /* Sources */,
+				A800000004 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ThumbnailExtension;
+			packageProductDependencies = (
+				A500000004 /* ZIPFoundation */,
+			);
+			productName = ThumbnailExtension;
+			productReference = A300000007 /* ThumbnailExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -239,6 +296,9 @@
 					A300000006 = {
 						CreatedOnToolsVersion = 15.0;
 						TestTargetID = A300000004;
+					};
+					A300000008 = {
+						CreatedOnToolsVersion = 15.0;
 					};
 				};
 			};
@@ -260,6 +320,7 @@
 			targets = (
 				A300000004 /* Preview3MF */,
 				A300000003 /* PreviewExtension */,
+				A300000008 /* ThumbnailExtension */,
 				A300000006 /* Preview3MFTests */,
 			);
 		};
@@ -307,6 +368,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA00000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000030 /* ThumbnailProvider.swift in Sources */,
+				A100000031 /* ThreeMFParser.swift in Sources */,
+				A100000032 /* SceneBuilder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -319,6 +390,11 @@
 			isa = PBXTargetDependency;
 			target = A300000004 /* Preview3MF */;
 			targetProxy = A600000003 /* PBXContainerItemProxy */;
+		};
+		A600000006 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A300000008 /* ThumbnailExtension */;
+			targetProxy = A600000005 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -635,6 +711,98 @@
 			};
 			name = Release;
 		};
+		AC00000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = ThumbnailExtension/ThumbnailExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ThumbnailExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ThumbnailExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.4;
+				PRODUCT_BUNDLE_IDENTIFIER = com.preview3mf.Preview3MF.ThumbnailExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AC00000010 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = ThumbnailExtension/ThumbnailExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ThumbnailExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ThumbnailExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.4;
+				PRODUCT_BUNDLE_IDENTIFIER = com.preview3mf.Preview3MF.ThumbnailExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -674,6 +842,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		AB00000005 /* Build configuration list for PBXNativeTarget "ThumbnailExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AC00000009 /* Debug */,
+				AC00000010 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -694,6 +871,11 @@
 			productName = ZIPFoundation;
 		};
 		A500000002 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A500000003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+		A500000004 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A500000003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
