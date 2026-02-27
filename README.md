@@ -59,3 +59,4 @@ Or open `Preview3MF.xcodeproj` in Xcode and hit Cmd+R.
 ## License
 
 MIT
+
