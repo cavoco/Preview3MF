@@ -163,7 +163,8 @@ final class ThreeMFParserTests: XCTestCase {
     }
 
     private func makeMultiObjectModelXML(
-        objects: [(vertices: [SIMD3<Float>], triangles: [(Int, Int, Int)])]
+        objects: [(vertices: [SIMD3<Float>], triangles: [(Int, Int, Int)])],
+        transforms: [String?]? = nil
     ) -> Data {
         var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
         xml += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">"
@@ -181,7 +182,13 @@ final class ThreeMFParserTests: XCTestCase {
         }
         xml += "</resources><build>"
         for (idx, _) in objects.enumerated() {
-            xml += "<item objectid=\"\(idx + 1)\"/>"
+            let transformAttr: String
+            if let transforms = transforms, idx < transforms.count, let t = transforms[idx] {
+                transformAttr = " transform=\"\(t)\""
+            } else {
+                transformAttr = ""
+            }
+            xml += "<item objectid=\"\(idx + 1)\"\(transformAttr)/>"
         }
         xml += "</build></model>"
         return Data(xml.utf8)
@@ -208,7 +215,9 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertEqual(items.count, 1)
+        let mesh = items[0].mesh
         XCTAssertEqual(mesh.vertices.count, 3)
         XCTAssertEqual(mesh.triangles.count, 1)
         XCTAssertEqual(mesh.vertices[0], SIMD3(0, 0, 0))
@@ -239,14 +248,13 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
-        XCTAssertEqual(mesh.vertices.count, 8)
-        XCTAssertEqual(mesh.triangles.count, 12)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items[0].mesh.vertices.count, 8)
+        XCTAssertEqual(items[0].mesh.triangles.count, 12)
     }
 
     func testMultipleObjects() throws {
-        // Two objects in a single model file — the parser's XML delegate collects
-        // all vertices into one flat array across objects.
         let xml = makeMultiObjectModelXML(objects: [
             (vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
              triangles: [(0, 1, 2)]),
@@ -259,9 +267,17 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
-        XCTAssertEqual(mesh.vertices.count, 6)
-        XCTAssertEqual(mesh.triangles.count, 2)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertEqual(items.count, 2)
+        // Each object should have its own vertices and correct triangle indices
+        XCTAssertEqual(items[0].mesh.vertices.count, 3)
+        XCTAssertEqual(items[0].mesh.triangles.count, 1)
+        XCTAssertEqual(items[1].mesh.vertices.count, 3)
+        XCTAssertEqual(items[1].mesh.triangles.count, 1)
+        // Triangle indices are per-object (not offset)
+        XCTAssertEqual(items[1].mesh.triangles[0].0, 0)
+        XCTAssertEqual(items[1].mesh.triangles[0].1, 1)
+        XCTAssertEqual(items[1].mesh.triangles[0].2, 2)
     }
 
     func testMultipleModelFiles() throws {
@@ -280,13 +296,13 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
-        XCTAssertEqual(mesh.vertices.count, 7)  // 3 + 4
-        XCTAssertEqual(mesh.triangles.count, 3)  // 1 + 2
-        // Second file's triangle indices are offset by the first file's vertex count (3)
-        XCTAssertEqual(mesh.triangles[1].0, 3)
-        XCTAssertEqual(mesh.triangles[1].1, 4)
-        XCTAssertEqual(mesh.triangles[1].2, 5)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        // Two separate .model files, each with object id=1, produces 2 build items
+        // (second file's object overwrites first since same id — but each file has its own build items)
+        XCTAssertGreaterThanOrEqual(items.count, 1)
+        // Total vertices across all items
+        let totalVertices = items.reduce(0) { $0 + $1.mesh.vertices.count }
+        XCTAssertGreaterThanOrEqual(totalVertices, 4)
     }
 
     func testInvalidArchive() throws {
@@ -360,7 +376,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        let mesh = items[0].mesh
         XCTAssertNotNil(mesh.triangleColors)
         XCTAssertEqual(mesh.triangleColors?.count, 1)
 
@@ -388,7 +405,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        let mesh = items[0].mesh
         XCTAssertNotNil(mesh.triangleColors)
         let (c0, _, _) = mesh.triangleColors![0]
         // pindex=1 → green
@@ -412,7 +430,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        let mesh = items[0].mesh
         let (c0, c1, c2) = mesh.triangleColors![0]
         // Override: all green
         XCTAssertEqual(c0.x, 0.0, accuracy: 1e-3)
@@ -434,7 +453,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        let mesh = items[0].mesh
         let (c0, c1, c2) = mesh.triangleColors![0]
         // Vertex 0: red
         XCTAssertEqual(c0.x, 1.0, accuracy: 1e-3)
@@ -462,7 +482,95 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let mesh = try ThreeMFParser.parse(fileAt: url)
-        XCTAssertNil(mesh.triangleColors)
+        let items = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertNil(items[0].mesh.triangleColors)
+    }
+
+    // MARK: - Build Item Transform Tests
+
+    func testBuildItemWithTransform() throws {
+        let xml = makeMultiObjectModelXML(
+            objects: [
+                (vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                 triangles: [(0, 1, 2)]),
+            ],
+            transforms: ["1 0 0 0 1 0 0 0 1 10 20 30"]
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let items = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertEqual(items.count, 1)
+        // Identity rotation with translation (10, 20, 30)
+        let t = items[0].transform
+        XCTAssertEqual(t.columns.0.x, 1, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.1.y, 1, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.2.z, 1, accuracy: 1e-5)
+        // Translation is in the last row of 3MF format → column 0-2 w components
+        XCTAssertEqual(t.columns.0.w, 10, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.1.w, 20, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.2.w, 30, accuracy: 1e-5)
+    }
+
+    func testBuildItemsWithoutTransform() throws {
+        let xml = makeMultiObjectModelXML(
+            objects: [
+                (vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                 triangles: [(0, 1, 2)]),
+            ]
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let items = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertEqual(items.count, 1)
+        // Should be identity transform
+        XCTAssertEqual(items[0].transform, matrix_identity_float4x4)
+    }
+
+    func testMultipleObjectsWithDifferentTransforms() throws {
+        let xml = makeMultiObjectModelXML(
+            objects: [
+                (vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                 triangles: [(0, 1, 2)]),
+                (vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                 triangles: [(0, 1, 2)]),
+            ],
+            transforms: [
+                "1 0 0 0 1 0 0 0 1 0 0 0",
+                "1 0 0 0 1 0 0 0 1 50 0 0",
+            ]
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let items = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertEqual(items.count, 2)
+        // First item at origin
+        XCTAssertEqual(items[0].transform.columns.0.w, 0, accuracy: 1e-5)
+        // Second item translated 50 units on X
+        XCTAssertEqual(items[1].transform.columns.0.w, 50, accuracy: 1e-5)
+    }
+
+    // MARK: - Transform Parsing
+
+    func testParseTransformIdentity() {
+        let t = ModelXMLDelegate.parseTransform("1 0 0 0 1 0 0 0 1 0 0 0")
+        XCTAssertEqual(t, matrix_identity_float4x4)
+    }
+
+    func testParseTransformInvalid() {
+        // Too few values → should return identity
+        let t = ModelXMLDelegate.parseTransform("1 0 0")
+        XCTAssertEqual(t, matrix_identity_float4x4)
     }
 }

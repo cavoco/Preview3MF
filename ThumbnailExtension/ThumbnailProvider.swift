@@ -9,8 +9,8 @@ class ThumbnailProvider: QLThumbnailProvider {
         let scale = request.scale
 
         do {
-            let mesh = try ThreeMFParser.parse(fileAt: url)
-            let scene = SceneBuilder.buildScene(from: mesh)
+            let items = try ThreeMFParser.parse(fileAt: url)
+            let scene = SceneBuilder.buildScene(from: items)
 
             // Strip any animations (rotation) — we want a static snapshot
             scene.rootNode.enumerateChildNodes { node, _ in

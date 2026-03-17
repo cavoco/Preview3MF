@@ -21,8 +21,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         do {
-            let mesh = try ThreeMFParser.parse(fileAt: url)
-            let scene = SceneBuilder.buildScene(from: mesh)
+            let items = try ThreeMFParser.parse(fileAt: url)
+            let scene = SceneBuilder.buildScene(from: items)
             sceneView.scene = scene
             handler(nil)
         } catch {

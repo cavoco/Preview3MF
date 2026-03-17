@@ -78,8 +78,8 @@ struct ContentView: View {
     private func loadFile(at url: URL) {
         errorMessage = nil
         do {
-            let mesh = try ThreeMFParser.parse(fileAt: url)
-            scene = SceneBuilder.buildScene(from: mesh)
+            let items = try ThreeMFParser.parse(fileAt: url)
+            scene = SceneBuilder.buildScene(from: items)
         } catch {
             errorMessage = error.localizedDescription
             scene = nil

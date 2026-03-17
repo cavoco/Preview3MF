@@ -7,38 +7,56 @@ final class SceneBuilderTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeTriangleMesh() -> MeshData {
-        MeshData(
-            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
-            triangles: [(0, 1, 2)]
-        )
+    private func makeTriangleItems() -> [BuildItem] {
+        [BuildItem(
+            mesh: MeshData(
+                vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                triangles: [(0, 1, 2)]
+            ),
+            transform: matrix_identity_float4x4
+        )]
     }
 
-    private func makeCubeMesh() -> MeshData {
-        MeshData(
-            vertices: [
-                SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(1, 1, 0), SIMD3(0, 1, 0),
-                SIMD3(0, 0, 1), SIMD3(1, 0, 1), SIMD3(1, 1, 1), SIMD3(0, 1, 1),
-            ],
-            triangles: [
-                (0, 1, 2), (0, 2, 3),
-                (4, 6, 5), (4, 7, 6),
-                (0, 4, 5), (0, 5, 1),
-                (3, 2, 6), (3, 6, 7),
-                (0, 3, 7), (0, 7, 4),
-                (1, 5, 6), (1, 6, 2),
-            ]
+    private func makeCubeItems() -> [BuildItem] {
+        [BuildItem(
+            mesh: MeshData(
+                vertices: [
+                    SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(1, 1, 0), SIMD3(0, 1, 0),
+                    SIMD3(0, 0, 1), SIMD3(1, 0, 1), SIMD3(1, 1, 1), SIMD3(0, 1, 1),
+                ],
+                triangles: [
+                    (0, 1, 2), (0, 2, 3),
+                    (4, 6, 5), (4, 7, 6),
+                    (0, 4, 5), (0, 5, 1),
+                    (3, 2, 6), (3, 6, 7),
+                    (0, 3, 7), (0, 7, 4),
+                    (1, 5, 6), (1, 6, 2),
+                ]
+            ),
+            transform: matrix_identity_float4x4
+        )]
+    }
+
+    private func findContainerNode(in scene: SCNScene) throws -> SCNNode {
+        let pivotNode = try XCTUnwrap(
+            scene.rootNode.childNodes.first { !$0.childNodes.isEmpty && $0.camera == nil && $0.light == nil },
+            "Should have a pivot node"
         )
+        let containerNode = try XCTUnwrap(
+            pivotNode.childNodes.first { !$0.childNodes.isEmpty || $0.geometry != nil },
+            "Pivot should contain a container node"
+        )
+        return containerNode
     }
 
     private func findModelNode(in scene: SCNScene) throws -> SCNNode {
-        let pivotNode = try XCTUnwrap(
-            scene.rootNode.childNodes.first { $0.childNodes.contains { $0.geometry != nil } },
-            "Should have a pivot node containing the model"
-        )
+        let container = try findContainerNode(in: scene)
+        if container.geometry != nil {
+            return container
+        }
         return try XCTUnwrap(
-            pivotNode.childNodes.first { $0.geometry != nil },
-            "Pivot should contain a model node with geometry"
+            container.childNodes.first { $0.geometry != nil },
+            "Container should contain a model node with geometry"
         )
     }
 
@@ -67,24 +85,19 @@ final class SceneBuilderTests: XCTestCase {
     // MARK: - Tests
 
     func testSceneNodeHierarchy() throws {
-        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
-
-        let pivotNode = try XCTUnwrap(
-            scene.rootNode.childNodes.first { $0.childNodes.contains { $0.geometry != nil } },
-            "Should have a pivot node containing the model"
-        )
-        let modelNode = pivotNode.childNodes.first { $0.geometry != nil }
-        XCTAssertNotNil(modelNode, "Pivot should contain a model node with geometry")
+        let scene = SceneBuilder.buildScene(from: makeTriangleItems())
+        let modelNode = try findModelNode(in: scene)
+        XCTAssertNotNil(modelNode.geometry, "Model node should have geometry")
     }
 
     func testCameraExists() {
-        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeTriangleItems())
         let cameraNodes = scene.rootNode.childNodes.filter { $0.camera != nil }
         XCTAssertEqual(cameraNodes.count, 1, "Scene should have exactly one camera")
     }
 
     func testLightingSetup() {
-        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeTriangleItems())
         let lightNodes = scene.rootNode.childNodes.filter { $0.light != nil }
         XCTAssertEqual(lightNodes.count, 3, "Scene should have 3 lights")
 
@@ -96,19 +109,19 @@ final class SceneBuilderTests: XCTestCase {
     }
 
     func testGeometryVertexCount() throws {
-        let mesh = makeCubeMesh()
-        let scene = SceneBuilder.buildScene(from: mesh)
+        let items = makeCubeItems()
+        let scene = SceneBuilder.buildScene(from: items)
 
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
         let vertexSource = try XCTUnwrap(geometry.sources.first { $0.semantic == .vertex })
 
         // Flat shading: each triangle gets its own 3 vertices
-        XCTAssertEqual(vertexSource.vectorCount, mesh.triangles.count * 3)
+        XCTAssertEqual(vertexSource.vectorCount, items[0].mesh.triangles.count * 3)
     }
 
     func testGeometryHasNormals() throws {
-        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeTriangleItems())
 
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
@@ -122,15 +135,12 @@ final class SceneBuilderTests: XCTestCase {
     }
 
     func testNormalValues() throws {
-        // Triangle in the XY plane at z=0: (0,0,0), (1,0,0), (0,1,0)
-        // CCW cross product of (1,0,0)-(0,0,0) x (0,1,0)-(0,0,0) = (0,0,1)
-        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeTriangleItems())
 
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
         let normals = try extractNormals(from: geometry)
 
-        // Single triangle produces 3 identical normals (flat shading)
         XCTAssertEqual(normals.count, 3)
         for normal in normals {
             XCTAssertEqual(normal.x, 0, accuracy: 1e-5)
@@ -140,15 +150,17 @@ final class SceneBuilderTests: XCTestCase {
     }
 
     func testNormalValuesMultipleTriangles() throws {
-        // Two triangles: one in XY plane (normal +Z), one in XZ plane (normal -Y)
-        let mesh = MeshData(
-            vertices: [
-                SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0),  // XY plane
-                SIMD3(0, 0, 0), SIMD3(0, 0, 1), SIMD3(1, 0, 0),  // XZ plane, CCW from -Y
-            ],
-            triangles: [(0, 1, 2), (3, 4, 5)]
-        )
-        let scene = SceneBuilder.buildScene(from: mesh)
+        let items = [BuildItem(
+            mesh: MeshData(
+                vertices: [
+                    SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0),
+                    SIMD3(0, 0, 0), SIMD3(0, 0, 1), SIMD3(1, 0, 0),
+                ],
+                triangles: [(0, 1, 2), (3, 4, 5)]
+            ),
+            transform: matrix_identity_float4x4
+        )]
+        let scene = SceneBuilder.buildScene(from: items)
 
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
@@ -156,14 +168,12 @@ final class SceneBuilderTests: XCTestCase {
 
         XCTAssertEqual(normals.count, 6)
 
-        // First triangle: normal should be (0, 0, 1)
         for i in 0..<3 {
             XCTAssertEqual(normals[i].x, 0, accuracy: 1e-5)
             XCTAssertEqual(normals[i].y, 0, accuracy: 1e-5)
             XCTAssertEqual(normals[i].z, 1, accuracy: 1e-5)
         }
 
-        // Second triangle: cross((0,0,1)-(0,0,0), (1,0,0)-(0,0,0)) = (0,1,0)
         for i in 3..<6 {
             XCTAssertEqual(normals[i].x, 0, accuracy: 1e-5)
             XCTAssertEqual(normals[i].y, 1, accuracy: 1e-5)
@@ -172,18 +182,18 @@ final class SceneBuilderTests: XCTestCase {
     }
 
     func testDegenerateTriangle() throws {
-        // Collinear points produce a zero-length cross product.
-        // simd_normalize of a zero vector yields NaN — verify the builder doesn't crash.
-        let mesh = MeshData(
-            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(2, 0, 0)],
-            triangles: [(0, 1, 2)]
-        )
-        let scene = SceneBuilder.buildScene(from: mesh)
+        let items = [BuildItem(
+            mesh: MeshData(
+                vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(2, 0, 0)],
+                triangles: [(0, 1, 2)]
+            ),
+            transform: matrix_identity_float4x4
+        )]
+        let scene = SceneBuilder.buildScene(from: items)
 
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
 
-        // Should still produce geometry with 3 vertices and normals (even if NaN)
         let vertexSource = try XCTUnwrap(geometry.sources.first { $0.semantic == .vertex })
         let normalSource = try XCTUnwrap(geometry.sources.first { $0.semantic == .normal })
         XCTAssertEqual(vertexSource.vectorCount, 3)
@@ -191,7 +201,7 @@ final class SceneBuilderTests: XCTestCase {
     }
 
     func testSingleTriangleVertexCount() throws {
-        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeTriangleItems())
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
         let vertexSource = try XCTUnwrap(geometry.sources.first { $0.semantic == .vertex })
@@ -199,24 +209,26 @@ final class SceneBuilderTests: XCTestCase {
     }
 
     func testModelCentering() throws {
-        let mesh = MeshData(
-            vertices: [SIMD3(2, 4, 6), SIMD3(4, 8, 12), SIMD3(6, 4, 6)],
-            triangles: [(0, 1, 2)]
-        )
-        let scene = SceneBuilder.buildScene(from: mesh)
+        let items = [BuildItem(
+            mesh: MeshData(
+                vertices: [SIMD3(2, 4, 6), SIMD3(4, 8, 12), SIMD3(6, 4, 6)],
+                triangles: [(0, 1, 2)]
+            ),
+            transform: matrix_identity_float4x4
+        )]
+        let scene = SceneBuilder.buildScene(from: items)
 
-        let modelNode = try findModelNode(in: scene)
+        let container = try findContainerNode(in: scene)
 
         // Bounding box center: ((2+6)/2, (4+8)/2, (6+12)/2) = (4, 6, 9)
-        // Position should negate the center to place the model at the origin
-        let pos = modelNode.position
+        let pos = container.position
         XCTAssertEqual(pos.x, -4, accuracy: 0.01)
         XCTAssertEqual(pos.y, -6, accuracy: 0.01)
         XCTAssertEqual(pos.z, -9, accuracy: 0.01)
     }
 
     func testMaterialProperties() throws {
-        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeTriangleItems())
 
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
@@ -236,17 +248,20 @@ final class SceneBuilderTests: XCTestCase {
 
     // MARK: - Color Tests
 
-    private func makeColoredTriangleMesh() -> MeshData {
+    private func makeColoredTriangleItems() -> [BuildItem] {
         let red = SIMD4<Float>(1, 0, 0, 1)
-        return MeshData(
-            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
-            triangles: [(0, 1, 2)],
-            triangleColors: [(red, red, red)]
-        )
+        return [BuildItem(
+            mesh: MeshData(
+                vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                triangles: [(0, 1, 2)],
+                triangleColors: [(red, red, red)]
+            ),
+            transform: matrix_identity_float4x4
+        )]
     }
 
     func testColoredGeometryHasColorSource() throws {
-        let scene = SceneBuilder.buildScene(from: makeColoredTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeColoredTriangleItems())
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
 
@@ -257,7 +272,7 @@ final class SceneBuilderTests: XCTestCase {
     }
 
     func testUncoloredGeometryHasNoColorSource() throws {
-        let scene = SceneBuilder.buildScene(from: makeTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeTriangleItems())
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
 
@@ -266,7 +281,7 @@ final class SceneBuilderTests: XCTestCase {
     }
 
     func testColoredMaterialDiffuseIsWhite() throws {
-        let scene = SceneBuilder.buildScene(from: makeColoredTriangleMesh())
+        let scene = SceneBuilder.buildScene(from: makeColoredTriangleItems())
         let modelNode = try findModelNode(in: scene)
         let geometry = try XCTUnwrap(modelNode.geometry)
         let material = try XCTUnwrap(geometry.materials.first)
@@ -275,5 +290,52 @@ final class SceneBuilderTests: XCTestCase {
                                          "Diffuse contents should be an NSColor")
         XCTAssertEqual(diffuseColor.whiteComponent, 1.0, accuracy: 0.01,
                        "Diffuse should be white when vertex colors are used")
+    }
+
+    // MARK: - Multi-Item Layout Tests
+
+    func testMultipleItemsCreateSeparateNodes() throws {
+        let items = [
+            BuildItem(
+                mesh: MeshData(
+                    vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                    triangles: [(0, 1, 2)]
+                ),
+                transform: matrix_identity_float4x4
+            ),
+            BuildItem(
+                mesh: MeshData(
+                    vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                    triangles: [(0, 1, 2)]
+                ),
+                transform: matrix_identity_float4x4
+            ),
+        ]
+        let scene = SceneBuilder.buildScene(from: items)
+        let container = try findContainerNode(in: scene)
+        let geometryNodes = container.childNodes.filter { $0.geometry != nil }
+        XCTAssertEqual(geometryNodes.count, 2, "Should have 2 geometry nodes for 2 build items")
+    }
+
+    func testItemTransformApplied() throws {
+        // Create a translation transform: move 10 units on X
+        var transform = matrix_identity_float4x4
+        transform.columns.3 = SIMD4(10, 0, 0, 1)
+
+        let items = [
+            BuildItem(
+                mesh: MeshData(
+                    vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                    triangles: [(0, 1, 2)]
+                ),
+                transform: transform
+            ),
+        ]
+        let scene = SceneBuilder.buildScene(from: items)
+        let container = try findContainerNode(in: scene)
+        let modelNode = try XCTUnwrap(container.childNodes.first { $0.geometry != nil })
+
+        // The node's simdTransform should match the build item transform
+        XCTAssertEqual(modelNode.simdTransform.columns.3.x, 10, accuracy: 1e-5)
     }
 }

@@ -3,24 +3,30 @@ import simd
 
 final class SceneBuilder {
 
-    static func buildScene(from mesh: MeshData) -> SCNScene {
+    static func buildScene(from items: [BuildItem]) -> SCNScene {
         let scene = SCNScene()
 
-        let geometry = buildGeometry(from: mesh)
-        let modelNode = SCNNode(geometry: geometry)
+        // Container holds all build items so we can center and rotate them together
+        let containerNode = SCNNode()
+        for item in items {
+            let geometry = buildGeometry(from: item.mesh)
+            let node = SCNNode(geometry: geometry)
+            node.simdTransform = item.transform
+            containerNode.addChildNode(node)
+        }
 
-        // Compute bounding box, then re-center the model at the origin
-        let (bbMin, bbMax) = modelNode.boundingBox
+        // Compute bounding box of the whole assembly, then re-center at the origin
+        let (bbMin, bbMax) = containerNode.boundingBox
         let center = SCNVector3(
             (bbMin.x + bbMax.x) / 2,
             (bbMin.y + bbMax.y) / 2,
             (bbMin.z + bbMax.z) / 2
         )
-        modelNode.position = SCNVector3(-center.x, -center.y, -center.z)
+        containerNode.position = SCNVector3(-center.x, -center.y, -center.z)
 
         // Pivot node sits at origin so rotation spins the model around its center
         let pivotNode = SCNNode()
-        pivotNode.addChildNode(modelNode)
+        pivotNode.addChildNode(containerNode)
         scene.rootNode.addChildNode(pivotNode)
 
         // Continuous rotation around the vertical (Y) axis
