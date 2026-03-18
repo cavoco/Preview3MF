@@ -12,17 +12,22 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
         sceneView = SCNView(frame: view.bounds)
         sceneView.autoresizingMask = [.width, .height]
-        sceneView.backgroundColor = .white
         sceneView.antialiasingMode = .multisampling4X
         sceneView.allowsCameraControl = true
         view.addSubview(sceneView)
         self.view = view
     }
 
+    private var currentAppearance: SceneBuilder.Appearance {
+        let name = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        return name == .darkAqua ? .dark : .light
+    }
+
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         do {
             let items = try ThreeMFParser.parse(fileAt: url)
-            let scene = SceneBuilder.buildScene(from: items)
+            let appearance = currentAppearance
+            let scene = SceneBuilder.buildScene(from: items, appearance: appearance)
             sceneView.scene = scene
             handler(nil)
         } catch {

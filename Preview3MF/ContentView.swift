@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var droppedFileURL: URL?
     @State private var scene: SCNScene?
     @State private var errorMessage: String?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 16) {
@@ -79,7 +80,8 @@ struct ContentView: View {
         errorMessage = nil
         do {
             let items = try ThreeMFParser.parse(fileAt: url)
-            scene = SceneBuilder.buildScene(from: items)
+            let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
+            scene = SceneBuilder.buildScene(from: items, appearance: appearance)
         } catch {
             errorMessage = error.localizedDescription
             scene = nil

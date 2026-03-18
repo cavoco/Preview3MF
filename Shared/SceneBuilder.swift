@@ -3,8 +3,18 @@ import simd
 
 final class SceneBuilder {
 
-    static func buildScene(from items: [BuildItem]) -> SCNScene {
+    enum Appearance {
+        case light
+        case dark
+    }
+
+    static func buildScene(from items: [BuildItem], appearance: Appearance = .light) -> SCNScene {
         let scene = SCNScene()
+
+        let isDark = appearance == .dark
+        scene.background.contents = isDark
+            ? NSColor(white: 0.15, alpha: 1.0)
+            : NSColor.white
 
         // Container holds all build items so we can center and rotate them together
         let containerNode = SCNNode()
@@ -59,7 +69,7 @@ final class SceneBuilder {
         // Key light
         let keyLight = SCNLight()
         keyLight.type = .directional
-        keyLight.intensity = 800
+        keyLight.intensity = isDark ? 600 : 800
         keyLight.color = NSColor.white
         let keyNode = SCNNode()
         keyNode.light = keyLight
@@ -70,7 +80,7 @@ final class SceneBuilder {
         // Fill light
         let fillLight = SCNLight()
         fillLight.type = .directional
-        fillLight.intensity = 400
+        fillLight.intensity = isDark ? 300 : 400
         fillLight.color = NSColor.white
         let fillNode = SCNNode()
         fillNode.light = fillLight
@@ -81,8 +91,8 @@ final class SceneBuilder {
         // Ambient light
         let ambientLight = SCNLight()
         ambientLight.type = .ambient
-        ambientLight.intensity = 300
-        ambientLight.color = NSColor(white: 0.8, alpha: 1.0)
+        ambientLight.intensity = isDark ? 200 : 300
+        ambientLight.color = NSColor(white: isDark ? 0.6 : 0.8, alpha: 1.0)
         let ambientNode = SCNNode()
         ambientNode.light = ambientLight
         scene.rootNode.addChildNode(ambientNode)
