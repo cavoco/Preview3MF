@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+
+      - name: Build Release
+        run: |
+          xcodebuild \
+            -scheme Preview3MF \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            -arch "$(uname -m)" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=YES \
+            ONLY_ACTIVE_ARCH=YES \
+            -quiet
+
+      - name: Zip app bundle
+        run: |
+          APP_PATH=$(find build/DerivedData -name "Preview3MF.app" -type d | head -1)
+          ditto -c -k --keepParent "$APP_PATH" "Preview3MF-${TAG}-arm64.zip"
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "$TAG" "Preview3MF-${TAG}-arm64.zip" \
+            --title "$TAG" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

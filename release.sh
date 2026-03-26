@@ -89,54 +89,8 @@ echo "✓ Committed and tagged $TAG"
 git -C "$SCRIPT_DIR" push origin main
 git -C "$SCRIPT_DIR" push origin "$TAG"
 
-echo "✓ Pushed to origin"
-
-# ── Build Release .app ───────────────────────────────────────────────────────
-BUILD_DIR="$SCRIPT_DIR/build"
-rm -rf "$BUILD_DIR"
-
-echo "Building $SCHEME (Release)..."
-xcodebuild \
-    -project "$SCRIPT_DIR/$( echo "$PROJECT" | sed 's|/.*||' )" \
-    -scheme "$SCHEME" \
-    -configuration Release \
-    -derivedDataPath "$BUILD_DIR/DerivedData" \
-    -arch "$(uname -m)" \
-    CODE_SIGN_IDENTITY="-" \
-    CODE_SIGNING_ALLOWED=YES \
-    ONLY_ACTIVE_ARCH=YES \
-    -quiet
-
-APP_PATH=$(find "$BUILD_DIR/DerivedData" -name "$PRODUCT.app" -type d | head -1)
-
-if [ -z "$APP_PATH" ]; then
-    echo "Error: Could not find $PRODUCT.app in build output"
-    exit 1
-fi
-
-echo "✓ Built $APP_PATH"
-
-# ── Zip the .app ─────────────────────────────────────────────────────────────
-ZIP_NAME="$PRODUCT-$TAG-$(uname -m).zip"
-ZIP_PATH="$BUILD_DIR/$ZIP_NAME"
-ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
-
-echo "✓ Zipped to $ZIP_PATH"
-
-# ── Create GitHub Release ────────────────────────────────────────────────────
-if ! command -v gh &>/dev/null; then
-    echo ""
-    echo "⚠ gh CLI not found — skipping GitHub Release creation."
-    echo "  Install it (brew install gh) then run:"
-    echo "  gh release create $TAG $ZIP_PATH --title \"$TAG\" --generate-notes"
-    exit 0
-fi
-
-gh release create "$TAG" "$ZIP_PATH" \
-    --title "$TAG" \
-    --generate-notes
-
 REPO_URL=$(git -C "$SCRIPT_DIR" remote get-url origin | sed 's/\.git$//;s|git@github.com:|https://github.com/|')
+echo "✓ Pushed to origin"
 echo ""
-echo "✓ Release $TAG created!"
-echo "  $REPO_URL/releases/tag/$TAG"
+echo "GitHub Actions will build and create the release automatically."
+echo "  $REPO_URL/actions"
