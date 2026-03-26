@@ -15,6 +15,57 @@ struct BuildItem {
     var transform: simd_float4x4
 }
 
+struct ModelMetadata {
+    var title: String?
+    var designer: String?
+    var description: String?
+    var copyright: String?
+    var application: String?
+}
+
+struct ParseResult {
+    var items: [BuildItem]
+    var metadata: ModelMetadata
+
+    var totalTriangles: Int {
+        items.reduce(0) { $0 + $1.mesh.triangles.count }
+    }
+
+    var totalVertices: Int {
+        items.reduce(0) { $0 + $1.mesh.vertices.count }
+    }
+
+    var objectCount: Int {
+        items.count
+    }
+
+    var hasColors: Bool {
+        items.contains { $0.mesh.triangleColors != nil }
+    }
+
+    /// Bounding box dimensions in model units (mm), accounting for transforms.
+    var boundingBox: (min: SIMD3<Float>, max: SIMD3<Float>)? {
+        guard !items.isEmpty else { return nil }
+        var bbMin = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var bbMax = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for item in items {
+            for vertex in item.mesh.vertices {
+                let v = SIMD4<Float>(vertex.x, vertex.y, vertex.z, 1.0)
+                let transformed = item.transform * v
+                let p = SIMD3<Float>(transformed.x, transformed.y, transformed.z)
+                bbMin = simd_min(bbMin, p)
+                bbMax = simd_max(bbMax, p)
+            }
+        }
+        return (bbMin, bbMax)
+    }
+
+    var dimensions: SIMD3<Float>? {
+        guard let bb = boundingBox else { return nil }
+        return bb.max - bb.min
+    }
+}
+
 enum ThreeMFParserError: Error, LocalizedError {
     case cannotOpenArchive
     case modelEntryNotFound
@@ -34,7 +85,7 @@ enum ThreeMFParserError: Error, LocalizedError {
 
 final class ThreeMFParser {
 
-    static func parse(fileAt url: URL) throws -> [BuildItem] {
+    static func parse(fileAt url: URL) throws -> ParseResult {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
@@ -63,6 +114,7 @@ final class ThreeMFParser {
         // Parse all model files, collecting objects keyed by id and build items
         var allObjects: [Int: MeshData] = [:]
         var allBuildItems: [(objectID: Int, transform: simd_float4x4)] = []
+        var metadata = ModelMetadata()
         let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
 
         for entry in modelEntries {
@@ -86,6 +138,13 @@ final class ThreeMFParser {
             }
 
             allBuildItems.append(contentsOf: delegate.buildItems)
+
+            // Merge metadata (first non-nil value wins)
+            if metadata.title == nil { metadata.title = delegate.metadata["Title"] }
+            if metadata.designer == nil { metadata.designer = delegate.metadata["Designer"] }
+            if metadata.description == nil { metadata.description = delegate.metadata["Description"] }
+            if metadata.copyright == nil { metadata.copyright = delegate.metadata["Copyright"] }
+            if metadata.application == nil { metadata.application = delegate.metadata["Application"] }
         }
 
         // If no build items were specified, create one per object with identity transform
@@ -128,7 +187,7 @@ final class ThreeMFParser {
             throw ThreeMFParserError.parsingFailed("No mesh data found in any model file")
         }
 
-        return result
+        return ParseResult(items: result, metadata: metadata)
     }
 
     // MARK: - ZIP64 patching
@@ -276,6 +335,8 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
     var objects: [Int: ParsedObject] = [:]
     /// Build items parsed from `<build><item>`.
     var buildItems: [(objectID: Int, transform: simd_float4x4)] = []
+    /// Metadata entries keyed by name (e.g. "Title", "Designer").
+    var metadata: [String: String] = [:]
 
     // Material groups: keyed by basematerials group id
     private var materialGroups: [Int: [SIMD4<Float>]] = [:]
@@ -291,6 +352,10 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
     // Object-level default material
     private var objectPID: Int?
     private var objectPIndex: Int?
+
+    // Metadata tracking
+    private var currentMetadataName: String?
+    private var currentMetadataText: String?
 
     private var inBuild = false
 
@@ -377,6 +442,12 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
 
             currentTriangleColors!.append((c0, c1, c2))
 
+        case "metadata":
+            if let name = attributes["name"] {
+                currentMetadataName = name
+                currentMetadataText = ""
+            }
+
         case "build":
             inBuild = true
 
@@ -428,11 +499,26 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
             objectPID = nil
             objectPIndex = nil
 
+        case "metadata":
+            if let name = currentMetadataName,
+               let text = currentMetadataText?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !text.isEmpty {
+                metadata[name] = text
+            }
+            currentMetadataName = nil
+            currentMetadataText = nil
+
         case "build":
             inBuild = false
 
         default:
             break
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if currentMetadataName != nil {
+            currentMetadataText?.append(string)
         }
     }
 

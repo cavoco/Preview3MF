@@ -215,7 +215,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         XCTAssertEqual(items.count, 1)
         let mesh = items[0].mesh
         XCTAssertEqual(mesh.vertices.count, 3)
@@ -248,7 +249,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items[0].mesh.vertices.count, 8)
         XCTAssertEqual(items[0].mesh.triangles.count, 12)
@@ -267,7 +269,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         XCTAssertEqual(items.count, 2)
         // Each object should have its own vertices and correct triangle indices
         XCTAssertEqual(items[0].mesh.vertices.count, 3)
@@ -296,7 +299,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         // Two separate .model files, each with object id=1, produces 2 build items
         // (second file's object overwrites first since same id — but each file has its own build items)
         XCTAssertGreaterThanOrEqual(items.count, 1)
@@ -376,7 +380,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         let mesh = items[0].mesh
         XCTAssertNotNil(mesh.triangleColors)
         XCTAssertEqual(mesh.triangleColors?.count, 1)
@@ -405,7 +410,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         let mesh = items[0].mesh
         XCTAssertNotNil(mesh.triangleColors)
         let (c0, _, _) = mesh.triangleColors![0]
@@ -430,7 +436,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         let mesh = items[0].mesh
         let (c0, c1, c2) = mesh.triangleColors![0]
         // Override: all green
@@ -453,7 +460,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         let mesh = items[0].mesh
         let (c0, c1, c2) = mesh.triangleColors![0]
         // Vertex 0: red
@@ -482,7 +490,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         XCTAssertNil(items[0].mesh.triangleColors)
     }
 
@@ -502,7 +511,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         XCTAssertEqual(items.count, 1)
         // Identity rotation with translation (10, 20, 30)
         let t = items[0].transform
@@ -528,7 +538,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         XCTAssertEqual(items.count, 1)
         // Should be identity transform
         XCTAssertEqual(items[0].transform, matrix_identity_float4x4)
@@ -553,7 +564,8 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(zip)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let items = try ThreeMFParser.parse(fileAt: url)
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let items = result.items
         XCTAssertEqual(items.count, 2)
         // First item at origin
         XCTAssertEqual(items[0].transform.columns.0.w, 0, accuracy: 1e-5)
@@ -572,5 +584,76 @@ final class ThreeMFParserTests: XCTestCase {
         // Too few values → should return identity
         let t = ModelXMLDelegate.parseTransform("1 0 0")
         XCTAssertEqual(t, matrix_identity_float4x4)
+    }
+
+    // MARK: - Metadata Tests
+
+    func testParseMetadata() throws {
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        xml += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">"
+        xml += "<metadata name=\"Title\">Test Cube</metadata>"
+        xml += "<metadata name=\"Designer\">Jane Doe</metadata>"
+        xml += "<metadata name=\"Description\">A simple test cube</metadata>"
+        xml += "<resources><object id=\"1\" type=\"model\"><mesh><vertices>"
+        xml += "<vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/><vertex x=\"0\" y=\"1\" z=\"0\"/>"
+        xml += "</vertices><triangles>"
+        xml += "<triangle v1=\"0\" v2=\"1\" v3=\"2\"/>"
+        xml += "</triangles></mesh></object></resources>"
+        xml += "<build><item objectid=\"1\"/></build></model>"
+
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: Data(xml.utf8))
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertEqual(result.metadata.title, "Test Cube")
+        XCTAssertEqual(result.metadata.designer, "Jane Doe")
+        XCTAssertEqual(result.metadata.description, "A simple test cube")
+    }
+
+    func testParseNoMetadata() throws {
+        let xml = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertNil(result.metadata.title)
+        XCTAssertNil(result.metadata.designer)
+        XCTAssertNil(result.metadata.description)
+    }
+
+    // MARK: - Stats Tests
+
+    func testParseResultStats() throws {
+        let xml = makeMultiObjectModelXML(objects: [
+            (vertices: [SIMD3(0, 0, 0), SIMD3(10, 0, 0), SIMD3(0, 20, 0)],
+             triangles: [(0, 1, 2)]),
+            (vertices: [SIMD3(0, 0, 0), SIMD3(5, 0, 0), SIMD3(0, 5, 30)],
+             triangles: [(0, 1, 2)]),
+        ])
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = try ThreeMFParser.parse(fileAt: url)
+        XCTAssertEqual(result.objectCount, 2)
+        XCTAssertEqual(result.totalTriangles, 2)
+        XCTAssertEqual(result.totalVertices, 6)
+        XCTAssertFalse(result.hasColors)
+
+        let dims = result.dimensions!
+        XCTAssertEqual(dims.x, 10, accuracy: 1e-3)
+        XCTAssertEqual(dims.y, 20, accuracy: 1e-3)
+        XCTAssertEqual(dims.z, 30, accuracy: 1e-3)
     }
 }
