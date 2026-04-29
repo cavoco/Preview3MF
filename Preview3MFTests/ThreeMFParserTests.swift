@@ -656,4 +656,99 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(dims.y, 20, accuracy: 1e-3)
         XCTAssertEqual(dims.z, 30, accuracy: 1e-3)
     }
+
+    // MARK: - Embedded Thumbnail Tests
+
+    /// Smallest possible PNG: the 8-byte PNG signature plus a single IHDR chunk would not
+    /// actually decode, but the parser only needs to round-trip bytes. We use distinctive
+    /// payloads so each test can assert which file was returned.
+    private func fakePNG(tag: String) -> Data {
+        var data = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        data.append(Data(tag.utf8))
+        return data
+    }
+
+    private func makeRelsXML(thumbnailTarget: String) -> Data {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rel-1" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail" Target="\(thumbnailTarget)"/>
+          <Relationship Id="rel-2" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" Target="/3D/3dmodel.model"/>
+        </Relationships>
+        """
+        return Data(xml.utf8)
+    }
+
+    func testExtractEmbeddedThumbnailReturnsNilWhenAbsent() throws {
+        let xml = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: xml)
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = try ThreeMFParser.extractEmbeddedThumbnail(fileAt: url)
+        XCTAssertNil(result)
+    }
+
+    func testExtractEmbeddedThumbnailFromKnownPath() throws {
+        let modelXML = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        let png = fakePNG(tag: "plate-1-bytes")
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: modelXML),
+            .init(path: "Metadata/plate_1.png", data: png),
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = try ThreeMFParser.extractEmbeddedThumbnail(fileAt: url)
+        XCTAssertEqual(result, png)
+    }
+
+    func testExtractEmbeddedThumbnailPrefersRelationshipTarget() throws {
+        // When _rels/.rels declares a thumbnail target, that should win even if a higher-priority
+        // known path also exists. Slicers vary, and an explicit relationship is authoritative.
+        let modelXML = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        let plateBytes = fakePNG(tag: "plate-1")
+        let relsBytes = fakePNG(tag: "rels-target")
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "_rels/.rels", data: makeRelsXML(thumbnailTarget: "/Metadata/custom.png")),
+            .init(path: "3D/3dmodel.model", data: modelXML),
+            .init(path: "Metadata/plate_1.png", data: plateBytes),
+            .init(path: "Metadata/custom.png", data: relsBytes),
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = try ThreeMFParser.extractEmbeddedThumbnail(fileAt: url)
+        XCTAssertEqual(result, relsBytes)
+    }
+
+    func testExtractEmbeddedThumbnailFallsBackWhenRelationshipTargetMissing() throws {
+        // _rels/.rels points at a file that isn't actually in the archive — fall back to known paths.
+        let modelXML = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        let thumbBytes = fakePNG(tag: "opc-thumbnail")
+        let zip = MiniZIP.createArchive(entries: [
+            .init(path: "_rels/.rels", data: makeRelsXML(thumbnailTarget: "/Metadata/missing.png")),
+            .init(path: "3D/3dmodel.model", data: modelXML),
+            .init(path: "Metadata/thumbnail.png", data: thumbBytes),
+        ])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = try ThreeMFParser.extractEmbeddedThumbnail(fileAt: url)
+        XCTAssertEqual(result, thumbBytes)
+    }
 }

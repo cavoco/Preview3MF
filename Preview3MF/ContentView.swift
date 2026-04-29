@@ -14,25 +14,41 @@ struct ContentView: View {
             Text("Preview3MF")
                 .font(.largeTitle.bold())
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Quick Look extension is installed")
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.accentColor)
+                    Text("Enable both extensions to use Preview3MF")
                         .font(.headline)
                 }
 
-                Text("Select a .3mf file in Finder and press Space to preview.")
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label {
+                        Text("**PreviewExtension** — Space-bar 3D preview")
+                    } icon: {
+                        Image(systemName: "eye")
+                            .foregroundColor(.secondary)
+                    }
+                    Label {
+                        Text("**ThumbnailExtension** — Finder icon previews")
+                    } icon: {
+                        Image(systemName: "photo")
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .font(.callout)
 
-                Button("Open System Extensions Settings") {
+                Button("Open Quick Look Extensions in System Settings") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preferences.extensions?Quick Look") {
                         NSWorkspace.shared.open(url)
                     }
                 }
-                .buttonStyle(.link)
-                .font(.caption)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                Text("Then press Space on any .3mf file in Finder.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Divider()

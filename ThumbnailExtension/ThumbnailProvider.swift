@@ -1,5 +1,6 @@
 import QuickLookThumbnailing
 import SceneKit
+import ImageIO
 
 class ThumbnailProvider: QLThumbnailProvider {
 
@@ -7,6 +8,24 @@ class ThumbnailProvider: QLThumbnailProvider {
         let url = request.fileURL
         let maximumSize = request.maximumSize
         let scale = request.scale
+
+        // Fast path: most slicers (Bambu Studio, OrcaSlicer, PrusaSlicer) embed a pre-rendered
+        // PNG. Hand it back without parsing geometry or invoking SceneKit.
+        if let imageData = try? ThreeMFParser.extractEmbeddedThumbnail(fileAt: url),
+           let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+           let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+            let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+            let reply = QLThumbnailReply(contextSize: maximumSize, drawing: { context -> Bool in
+                let drawRect = ThumbnailProvider.aspectFit(
+                    imageSize: imageSize,
+                    in: CGRect(origin: .zero, size: maximumSize)
+                )
+                context.draw(cgImage, in: drawRect)
+                return true
+            })
+            handler(reply, nil)
+            return
+        }
 
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
@@ -40,5 +59,13 @@ class ThumbnailProvider: QLThumbnailProvider {
         } catch {
             handler(nil, error)
         }
+    }
+
+    private static func aspectFit(imageSize: CGSize, in rect: CGRect) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0 else { return rect }
+        let scale = min(rect.width / imageSize.width, rect.height / imageSize.height)
+        let w = imageSize.width * scale
+        let h = imageSize.height * scale
+        return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
     }
 }

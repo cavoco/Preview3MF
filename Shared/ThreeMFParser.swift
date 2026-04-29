@@ -86,19 +86,7 @@ enum ThreeMFParserError: Error, LocalizedError {
 final class ThreeMFParser {
 
     static func parse(fileAt url: URL) throws -> ParseResult {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-        let fileData = try Data(contentsOf: url)
-        var patched = fileData
-        ThreeMFParser.patchZIP64Sentinels(&patched)
-
-        let archive: Archive
-        do {
-            archive = try Archive(data: patched, accessMode: .read)
-        } catch {
-            throw ThreeMFParserError.cannotOpenArchive
-        }
+        let archive = try openArchive(fileAt: url)
 
         // Collect all .model entries — mesh may be in 3D/3dmodel.model or 3D/Objects/*.model
         var modelEntries: [Entry] = []
@@ -188,6 +176,76 @@ final class ThreeMFParser {
         }
 
         return ParseResult(items: result, metadata: metadata)
+    }
+
+    /// Extract a pre-rendered preview image embedded in the .3mf archive without parsing geometry.
+    ///
+    /// Slicers (Bambu Studio, OrcaSlicer, PrusaSlicer) bake a rendered PNG into the package.
+    /// This is much cheaper than parsing the mesh and rendering with SceneKit, and at thumbnail
+    /// sizes the slicer's render is typically nicer than what we can produce ourselves.
+    ///
+    /// Lookup order: OPC relationship (`_rels/.rels`) first, then known slicer paths.
+    /// Returns the raw image bytes (typically PNG), or nil if no embedded thumbnail is present.
+    static func extractEmbeddedThumbnail(fileAt url: URL) throws -> Data? {
+        let archive = try openArchive(fileAt: url)
+
+        var candidates: [String] = []
+        if let target = thumbnailTargetFromRelationships(in: archive) {
+            candidates.append(target)
+        }
+        // Bambu/Orca high-quality plate render comes first — bigger and prettier than the
+        // OPC thumbnail when both exist.
+        candidates.append(contentsOf: [
+            "Metadata/plate_1.png",
+            "Metadata/thumbnail.png",
+            "Metadata/plate_no_light_1.png",
+            "Metadata/top_1.png",
+        ])
+
+        var seen = Set<String>()
+        for path in candidates where seen.insert(path).inserted {
+            guard let entry = archive[path], entry.type == .file else { continue }
+            var data = Data()
+            do {
+                _ = try archive.extract(entry) { data.append($0) }
+            } catch {
+                continue
+            }
+            if !data.isEmpty { return data }
+        }
+        return nil
+    }
+
+    private static func openArchive(fileAt url: URL) throws -> Archive {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        let fileData = try Data(contentsOf: url)
+        var patched = fileData
+        ThreeMFParser.patchZIP64Sentinels(&patched)
+
+        do {
+            return try Archive(data: patched, accessMode: .read)
+        } catch {
+            throw ThreeMFParserError.cannotOpenArchive
+        }
+    }
+
+    private static func thumbnailTargetFromRelationships(in archive: Archive) -> String? {
+        guard let entry = archive["_rels/.rels"], entry.type == .file else { return nil }
+        var data = Data()
+        do {
+            _ = try archive.extract(entry) { data.append($0) }
+        } catch {
+            return nil
+        }
+        guard !data.isEmpty else { return nil }
+
+        let delegate = RelationshipsXMLDelegate()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        guard parser.parse() else { return nil }
+        return delegate.thumbnailTarget
     }
 
     // MARK: - ZIP64 patching
@@ -560,5 +618,24 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
             let a = Float(value & 0xFF) / 255.0
             return SIMD4(r, g, b, a)
         }
+    }
+}
+
+/// Parses an OPC `_rels/.rels` file looking for the package-level thumbnail relationship.
+final class RelationshipsXMLDelegate: NSObject, XMLParserDelegate {
+    var thumbnailTarget: String?
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName: String?,
+        attributes: [String: String]
+    ) {
+        guard elementName == "Relationship" else { return }
+        guard let type = attributes["Type"], type.hasSuffix("/thumbnail") else { return }
+        guard var target = attributes["Target"] else { return }
+        if target.hasPrefix("/") { target.removeFirst() }
+        thumbnailTarget = target
     }
 }

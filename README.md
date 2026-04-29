@@ -15,9 +15,11 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 
 1. Download the latest release (or build from source)
 2. Move `Preview3MF.app` to `/Applications`
-3. Launch it once — this registers the Quick Look extension
-4. Go to **System Settings → Privacy & Security → Extensions → Quick Look** and make sure **PreviewExtension** is enabled
-5. That's it — press Space on any `.3mf` file in Finder
+3. Launch it once — this registers the Quick Look extensions
+4. Go to **System Settings → Privacy & Security → Extensions → Quick Look** and make sure **both** are enabled:
+   - **PreviewExtension** — the 3D preview shown when you press Space
+   - **ThumbnailExtension** — the rendered icon shown in Finder
+5. That's it — press Space on any `.3mf` file in Finder, or just look at the icons
 
 > **Tip:** If Quick Look doesn't pick it up immediately, run `qlmanage -r` in Terminal to reset the Quick Look cache.
 
