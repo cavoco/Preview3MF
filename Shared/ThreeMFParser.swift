@@ -287,7 +287,7 @@ final class ThreeMFParser {
         if cdOffset == Int(sentinel32) {
             // Read real offset from ZIP64 EOCD record (PK\x06\x06)
             if let zip64EOCD = findSignature(data, sig: [0x50, 0x4B, 0x06, 0x06]) {
-                let realCDOffset = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: zip64EOCD + 48, as: UInt64.self) }
+                let realCDOffset = load64(data, zip64EOCD + 48)
                 cdOffset = Int(realCDOffset)
                 let patched = UInt32(clamping: min(realCDOffset, UInt64(UInt32.max - 1)))
                 store32(&data, eocdOffset + 16, patched)
@@ -337,17 +337,17 @@ final class ThreeMFParser {
                 // but only for fields that were set to 0xFFFFFFFF in the header.
                 var pos = eOff + 4
                 if needUncomp, pos + 8 <= eOff + 4 + sz {
-                    let real = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: pos, as: UInt64.self) }
+                    let real = load64(data, pos)
                     store32(&data, uncompOffset, UInt32(clamping: min(real, UInt64(UInt32.max - 1))))
                     pos += 8
                 }
                 if needComp, pos + 8 <= eOff + 4 + sz {
-                    let real = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: pos, as: UInt64.self) }
+                    let real = load64(data, pos)
                     store32(&data, compOffset, UInt32(clamping: min(real, UInt64(UInt32.max - 1))))
                     pos += 8
                 }
                 if needLocalOffset, let lhOff = localHeaderOffset, pos + 8 <= eOff + 4 + sz {
-                    let real = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: pos, as: UInt64.self) }
+                    let real = load64(data, pos)
                     store32(&data, lhOff, UInt32(clamping: min(real, UInt64(UInt32.max - 1))))
                 }
                 return
@@ -366,15 +366,28 @@ final class ThreeMFParser {
         return nil
     }
 
+    // Bounds-checked readers/writer: a corrupt or truncated archive can produce
+    // offsets past the end of `data`, and an unchecked loadUnaligned there would
+    // crash the (already sandboxed) Quick Look extension. Out-of-range reads
+    // return 0 and out-of-range writes are dropped, leaving the sentinel in place
+    // so the archive simply fails to open instead of taking the process down.
     private static func load16(_ data: Data, _ offset: Int) -> UInt16 {
-        data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt16.self) }
+        guard offset >= 0, offset + 2 <= data.count else { return 0 }
+        return data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt16.self) }
     }
 
     private static func load32(_ data: Data, _ offset: Int) -> UInt32 {
-        data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self) }
+        guard offset >= 0, offset + 4 <= data.count else { return 0 }
+        return data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self) }
+    }
+
+    private static func load64(_ data: Data, _ offset: Int) -> UInt64 {
+        guard offset >= 0, offset + 8 <= data.count else { return 0 }
+        return data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt64.self) }
     }
 
     private static func store32(_ data: inout Data, _ offset: Int, _ value: UInt32) {
+        guard offset >= 0, offset + 4 <= data.count else { return }
         withUnsafeBytes(of: value) { data.replaceSubrange(offset..<offset+4, with: $0) }
     }
 }

@@ -8,7 +8,7 @@ final class SceneBuilder {
         case dark
     }
 
-    static func buildScene(from items: [BuildItem], appearance: Appearance = .light) -> SCNScene {
+    static func buildScene(from items: [BuildItem], appearance: Appearance = .light, showBuildPlate: Bool = true) -> SCNScene {
         let scene = SCNScene()
 
         let isDark = appearance == .dark
@@ -52,12 +52,24 @@ final class SceneBuilder {
         )
         let maxExtent = max(extents.x, extents.y, extents.z)
 
-        // Camera
+        // Build-plate grid — world-fixed (does not rotate with the model).
+        // Skipped for thumbnails, where the grid would just be noise at icon size.
+        var gridSize: Float = 0
+        if showBuildPlate {
+            let footprintMax = max(Float(extents.x), Float(extents.z))
+            gridSize = max(ceil(footprintMax * 1.5 / 50) * 50, 100)
+            let gridNode = buildBuildPlate(size: gridSize, appearance: appearance)
+            gridNode.position = SCNVector3(0, -extents.y / 2, 0)
+            scene.rootNode.addChildNode(gridNode)
+        }
+
+        // Camera (frame the larger of model or plate)
         let camera = SCNCamera()
         camera.automaticallyAdjustsZRange = true
         let cameraNode = SCNNode()
         cameraNode.camera = camera
-        let distance = CGFloat(maxExtent) * 1.8
+        let viewExtent = max(Float(maxExtent), gridSize * 0.5)
+        let distance = CGFloat(viewExtent) * 1.8
         cameraNode.position = SCNVector3(
             distance * 0.5,
             distance * 0.5,
@@ -100,6 +112,57 @@ final class SceneBuilder {
         return scene
     }
 
+    // MARK: - Build plate
+
+    private static func buildBuildPlate(size: Float, appearance: Appearance) -> SCNNode {
+        let isDark = appearance == .dark
+        let halfSize = size / 2
+        let minorStep: Float = 10
+        let majorEvery = 5  // every 5 minor steps = 50mm
+        let lineCount = Int(size / minorStep)
+        let halfCount = lineCount / 2
+
+        var minorVerts: [SCNVector3] = []
+        var majorVerts: [SCNVector3] = []
+        for i in -halfCount...halfCount {
+            let coord = Float(i) * minorStep
+            let lineX0 = SCNVector3(coord, 0, -halfSize)
+            let lineX1 = SCNVector3(coord, 0,  halfSize)
+            let lineZ0 = SCNVector3(-halfSize, 0, coord)
+            let lineZ1 = SCNVector3( halfSize, 0, coord)
+            if i % majorEvery == 0 {
+                majorVerts.append(contentsOf: [lineX0, lineX1, lineZ0, lineZ1])
+            } else {
+                minorVerts.append(contentsOf: [lineX0, lineX1, lineZ0, lineZ1])
+            }
+        }
+
+        let minorColor = isDark
+            ? NSColor(white: 0.30, alpha: 1.0)
+            : NSColor(white: 0.82, alpha: 1.0)
+        let majorColor = isDark
+            ? NSColor(white: 0.50, alpha: 1.0)
+            : NSColor(white: 0.55, alpha: 1.0)
+
+        let node = SCNNode()
+        node.addChildNode(makeLineNode(vertices: minorVerts, color: minorColor))
+        node.addChildNode(makeLineNode(vertices: majorVerts, color: majorColor))
+        return node
+    }
+
+    private static func makeLineNode(vertices: [SCNVector3], color: NSColor) -> SCNNode {
+        let source = SCNGeometrySource(vertices: vertices)
+        let indices: [UInt32] = (0..<UInt32(vertices.count)).map { $0 }
+        let element = SCNGeometryElement(indices: indices, primitiveType: .line)
+        let geometry = SCNGeometry(sources: [source], elements: [element])
+        let material = SCNMaterial()
+        material.diffuse.contents = color
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        geometry.materials = [material]
+        return SCNNode(geometry: geometry)
+    }
+
     // MARK: - Geometry
 
     static func buildGeometry(from mesh: MeshData) -> SCNGeometry {
@@ -114,9 +177,13 @@ final class SceneBuilder {
         let hasColors = mesh.triangleColors != nil
 
         for (i, tri) in triangles.enumerated() {
-            let v0 = vertices[Int(tri.0)]
-            let v1 = vertices[Int(tri.1)]
-            let v2 = vertices[Int(tri.2)]
+            let i0 = Int(tri.0), i1 = Int(tri.1), i2 = Int(tri.2)
+            // Skip triangles that reference vertices outside the mesh — a malformed
+            // .3mf would otherwise crash with an out-of-bounds access.
+            guard i0 < vertices.count, i1 < vertices.count, i2 < vertices.count else { continue }
+            let v0 = vertices[i0]
+            let v1 = vertices[i1]
+            let v2 = vertices[i2]
 
             // Compute face normal (CCW winding)
             let edge1 = v1 - v0
@@ -124,7 +191,9 @@ final class SceneBuilder {
             let normal = simd_normalize(simd_cross(edge1, edge2))
             let scnNormal = SCNVector3(normal.x, normal.y, normal.z)
 
-            let baseIndex = UInt32(i * 3)
+            // Index off the running vertex count, not i*3, so skipped triangles
+            // don't leave gaps that desync indices from faceVertices.
+            let baseIndex = UInt32(faceVertices.count)
             faceVertices.append(SCNVector3(v0.x, v0.y, v0.z))
             faceVertices.append(SCNVector3(v1.x, v1.y, v1.z))
             faceVertices.append(SCNVector3(v2.x, v2.y, v2.z))

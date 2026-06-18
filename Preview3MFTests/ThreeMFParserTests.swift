@@ -229,6 +229,37 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(mesh.triangles[0].2, 2)
     }
 
+    // MARK: - Malformed Archive Tests
+
+    func testGarbageDataThrows() throws {
+        let url = try writeTempFile(Data([0x50, 0x4B, 0x03, 0x04] + Array(repeating: 0xFF, count: 64)))
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertThrowsError(try ThreeMFParser.parse(fileAt: url),
+                             "Garbage data should throw, not crash")
+    }
+
+    func testEmptyDataThrows() throws {
+        let url = try writeTempFile(Data())
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertThrowsError(try ThreeMFParser.parse(fileAt: url))
+    }
+
+    func testMalformedZIP64ExtraFieldDoesNotCrash() throws {
+        // A local file header with ZIP64 sentinel sizes and an extra-field length
+        // that claims 20 bytes of ZIP64 extra data the file doesn't actually contain.
+        // The sentinel patcher must not read past the end of the buffer.
+        var bytes: [UInt8] = [0x50, 0x4B, 0x03, 0x04] // local file header signature
+        bytes += Array(repeating: 0x00, count: 14)    // version…crc (offsets 4–17)
+        bytes += [0xFF, 0xFF, 0xFF, 0xFF]             // compressed size = sentinel
+        bytes += [0xFF, 0xFF, 0xFF, 0xFF]             // uncompressed size = sentinel
+        bytes += [0x00, 0x00]                         // file name length = 0
+        bytes += [0x14, 0x00]                         // extra field length = 20 (but absent)
+        let url = try writeTempFile(Data(bytes))
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Pre-fix this would read out of bounds; it must simply throw instead.
+        XCTAssertThrowsError(try ThreeMFParser.parse(fileAt: url))
+    }
+
     func testParseCube() throws {
         let vertices: [SIMD3<Float>] = [
             SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(1, 1, 0), SIMD3(0, 1, 0),

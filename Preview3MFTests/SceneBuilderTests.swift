@@ -338,4 +338,91 @@ final class SceneBuilderTests: XCTestCase {
         // The node's simdTransform should match the build item transform
         XCTAssertEqual(modelNode.simdTransform.columns.3.x, 10, accuracy: 1e-5)
     }
+
+    // MARK: - Build Plate Tests
+
+    /// The plate is the only root-level node built from line geometry.
+    private func findBuildPlateNode(in scene: SCNScene) -> SCNNode? {
+        scene.rootNode.childNodes.first { node in
+            node.camera == nil && node.light == nil &&
+            node.childNodes.contains { $0.geometry?.elements.first?.primitiveType == .line }
+        }
+    }
+
+    func testBuildPlateExistsByDefault() {
+        let scene = SceneBuilder.buildScene(from: makeCubeItems())
+        XCTAssertNotNil(findBuildPlateNode(in: scene),
+                        "Scene should include a build-plate grid by default")
+    }
+
+    func testBuildPlateOmittedWhenDisabled() {
+        let scene = SceneBuilder.buildScene(from: makeCubeItems(), showBuildPlate: false)
+        XCTAssertNil(findBuildPlateNode(in: scene),
+                     "Build plate should be omitted when showBuildPlate is false")
+    }
+
+    func testBuildPlateHasMinorAndMajorLineNodes() throws {
+        let scene = SceneBuilder.buildScene(from: makeCubeItems())
+        let plate = try XCTUnwrap(findBuildPlateNode(in: scene))
+        let lineNodes = plate.childNodes.filter {
+            $0.geometry?.elements.first?.primitiveType == .line
+        }
+        XCTAssertEqual(lineNodes.count, 2, "Plate should have separate minor and major line nodes")
+    }
+
+    func testBuildPlateIsWorldFixed() throws {
+        // The model pivot spins; the plate must not, so the grid stays put under it.
+        let scene = SceneBuilder.buildScene(from: makeCubeItems())
+        let plate = try XCTUnwrap(findBuildPlateNode(in: scene))
+        XCTAssertFalse(plate.hasActions, "Build plate should not carry a rotation action")
+    }
+
+    func testBuildPlateSitsAtModelBase() throws {
+        // The unit cube spans y in [0, 1]; centered at the origin its base is at y = -0.5.
+        let scene = SceneBuilder.buildScene(from: makeCubeItems())
+        let plate = try XCTUnwrap(findBuildPlateNode(in: scene))
+        XCTAssertEqual(plate.position.y, -0.5, accuracy: 0.01)
+    }
+
+    // MARK: - Robustness Tests
+
+    func testOutOfRangeTriangleIndicesAreSkipped() throws {
+        // The second triangle references vertex 99, which does not exist —
+        // it must be dropped rather than crash the geometry builder.
+        let items = [BuildItem(
+            mesh: MeshData(
+                vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                triangles: [(0, 1, 2), (0, 1, 99)]
+            ),
+            transform: matrix_identity_float4x4
+        )]
+        let scene = SceneBuilder.buildScene(from: items)
+
+        let modelNode = try findModelNode(in: scene)
+        let geometry = try XCTUnwrap(modelNode.geometry)
+        let vertexSource = try XCTUnwrap(geometry.sources.first { $0.semantic == .vertex })
+        // Only the one valid triangle survives → 3 vertices.
+        XCTAssertEqual(vertexSource.vectorCount, 3)
+    }
+
+    func testOutOfRangeTriangleKeepsColorsAligned() throws {
+        // First triangle is invalid; the surviving (second) triangle's color must
+        // still line up — indices key off the running vertex count, not the loop index.
+        let red = SIMD4<Float>(1, 0, 0, 1)
+        let blue = SIMD4<Float>(0, 0, 1, 1)
+        let items = [BuildItem(
+            mesh: MeshData(
+                vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+                triangles: [(0, 1, 99), (0, 1, 2)],
+                triangleColors: [(red, red, red), (blue, blue, blue)]
+            ),
+            transform: matrix_identity_float4x4
+        )]
+        let scene = SceneBuilder.buildScene(from: items)
+
+        let modelNode = try findModelNode(in: scene)
+        let geometry = try XCTUnwrap(modelNode.geometry)
+        let colorSource = try XCTUnwrap(geometry.sources.first { $0.semantic == .color })
+        XCTAssertEqual(colorSource.vectorCount, 3, "Only the valid triangle's colors should remain")
+    }
 }
