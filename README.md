@@ -2,6 +2,10 @@
 
 A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press Space on any `.3mf` file in Finder to see a 3D preview of the model — no slicer needed.
 
+<p align="center">
+  <img src="docs/preview.png" alt="Preview3MF showing a 3D model on a build-plate grid in Quick Look" width="700">
+</p>
+
 ## Features
 
 - **Quick Look integration** — press Space in Finder to preview `.3mf` files
