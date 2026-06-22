@@ -101,6 +101,7 @@ final class ThreeMFParser {
 
         // Parse all model files, collecting objects keyed by id and build items
         var allObjects: [Int: MeshData] = [:]
+        var allComponents: [Int: [(objectID: Int, transform: simd_float4x4)]] = [:]
         var allBuildItems: [(objectID: Int, transform: simd_float4x4)] = []
         var metadata = ModelMetadata()
         let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
@@ -117,12 +118,17 @@ final class ThreeMFParser {
             guard parser.parse() else { continue }
 
             for (id, obj) in delegate.objects {
-                guard !obj.vertices.isEmpty else { continue }
-                allObjects[id] = MeshData(
-                    vertices: obj.vertices,
-                    triangles: obj.triangles,
-                    triangleColors: obj.triangleColors
-                )
+                if !obj.vertices.isEmpty {
+                    allObjects[id] = MeshData(
+                        vertices: obj.vertices,
+                        triangles: obj.triangles,
+                        triangleColors: obj.triangleColors
+                    )
+                }
+                // Retain assembly containers even though they carry no mesh of their own.
+                if !obj.components.isEmpty {
+                    allComponents[id] = obj.components
+                }
             }
 
             allBuildItems.append(contentsOf: delegate.buildItems)
@@ -133,13 +139,6 @@ final class ThreeMFParser {
             if metadata.description == nil { metadata.description = delegate.metadata["Description"] }
             if metadata.copyright == nil { metadata.copyright = delegate.metadata["Copyright"] }
             if metadata.application == nil { metadata.application = delegate.metadata["Application"] }
-        }
-
-        // If no build items were specified, create one per object with identity transform
-        if allBuildItems.isEmpty {
-            for id in allObjects.keys.sorted() {
-                allBuildItems.append((objectID: id, transform: matrix_identity_float4x4))
-            }
         }
 
         // Merge color data across objects: if any object has colors, backfill others with gray
@@ -155,19 +154,46 @@ final class ThreeMFParser {
             }
         }
 
-        // Assemble build items with their meshes
-        var result: [BuildItem] = []
-        var referencedIDs = Set<Int>()
+        // Objects referenced by a <component> are assembly parts, not standalone roots.
+        let componentChildIDs = Set(allComponents.values.flatMap { $0.map { $0.objectID } })
 
-        for item in allBuildItems {
-            guard let mesh = allObjects[item.objectID] else { continue }
-            result.append(BuildItem(mesh: mesh, transform: item.transform))
-            referencedIDs.insert(item.objectID)
+        // If no build items were specified, render every top-level object — i.e. one
+        // that isn't itself a component of another object — with an identity transform.
+        if allBuildItems.isEmpty {
+            let rootIDs = Set(allObjects.keys).union(allComponents.keys).subtracting(componentChildIDs)
+            for id in rootIDs.sorted() {
+                allBuildItems.append((objectID: id, transform: matrix_identity_float4x4))
+            }
         }
 
-        // Include any objects with mesh data not referenced by build items
-        // (e.g., component meshes referenced indirectly via <component>)
-        for id in allObjects.keys.sorted() where !referencedIDs.contains(id) {
+        // Flatten an object into (mesh, world-transform) pairs, following <component>
+        // references. `visited` breaks reference cycles in malformed files.
+        func expand(_ objectID: Int, _ transform: simd_float4x4, _ visited: Set<Int>) -> [BuildItem] {
+            guard !visited.contains(objectID), visited.count < 64 else { return [] }
+            var out: [BuildItem] = []
+            if let mesh = allObjects[objectID] {
+                out.append(BuildItem(mesh: mesh, transform: transform))
+            }
+            if let components = allComponents[objectID] {
+                var nextVisited = visited
+                nextVisited.insert(objectID)
+                for component in components {
+                    // A component transform is relative to its parent, so apply it first.
+                    out += expand(component.objectID, component.transform * transform, nextVisited)
+                }
+            }
+            return out
+        }
+
+        var result: [BuildItem] = []
+        for item in allBuildItems {
+            result += expand(item.objectID, item.transform, [])
+        }
+
+        // Safety net: render any mesh reached by neither a build item nor a component.
+        let buildItemIDs = Set(allBuildItems.map { $0.objectID })
+        for id in allObjects.keys.sorted()
+        where !buildItemIDs.contains(id) && !componentChildIDs.contains(id) {
             result.append(BuildItem(mesh: allObjects[id]!, transform: matrix_identity_float4x4))
         }
 
@@ -395,10 +421,15 @@ final class ThreeMFParser {
 // MARK: - XML Parsing
 
 /// Parsed data for a single `<object>` element.
+///
+/// An object is either a `<mesh>` (vertices/triangles) or a `<components>`
+/// container that references other objects by id with a transform — slicers use
+/// the latter for assemblies. Both can be empty; `components` drives expansion.
 struct ParsedObject {
     var vertices: [SIMD3<Float>] = []
     var triangles: [(UInt32, UInt32, UInt32)] = []
     var triangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
+    var components: [(objectID: Int, transform: simd_float4x4)] = []
 }
 
 final class ModelXMLDelegate: NSObject, XMLParserDelegate {
@@ -419,6 +450,7 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
     private var currentVertices: [SIMD3<Float>] = []
     private var currentTriangles: [(UInt32, UInt32, UInt32)] = []
     private var currentTriangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
+    private var currentComponents: [(objectID: Int, transform: simd_float4x4)] = []
 
     // Object-level default material
     private var objectPID: Int?
@@ -458,6 +490,7 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
                 currentVertices = []
                 currentTriangles = []
                 currentTriangleColors = nil
+                currentComponents = []
             }
             if let pidStr = attributes["pid"], let pid = Int(pidStr) {
                 objectPID = pid
@@ -513,6 +546,15 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
 
             currentTriangleColors!.append((c0, c1, c2))
 
+        case "component":
+            // A reference, inside an object's <components>, to another object by id.
+            guard currentObjectID != nil,
+                  let idStr = attributes["objectid"],
+                  let objectID = Int(idStr)
+            else { break }
+            let transform = attributes["transform"].map(Self.parseTransform) ?? matrix_identity_float4x4
+            currentComponents.append((objectID: objectID, transform: transform))
+
         case "metadata":
             if let name = attributes["name"] {
                 currentMetadataName = name
@@ -560,13 +602,15 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
                 objects[id] = ParsedObject(
                     vertices: currentVertices,
                     triangles: currentTriangles,
-                    triangleColors: currentTriangleColors
+                    triangleColors: currentTriangleColors,
+                    components: currentComponents
                 )
             }
             currentObjectID = nil
             currentVertices = []
             currentTriangles = []
             currentTriangleColors = nil
+            currentComponents = []
             objectPID = nil
             objectPIndex = nil
 

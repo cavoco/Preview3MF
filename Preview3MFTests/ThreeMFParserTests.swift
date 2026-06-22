@@ -604,6 +604,91 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(items[1].transform.columns.0.w, 50, accuracy: 1e-5)
     }
 
+    // MARK: - Component / Assembly Tests
+
+    /// A standalone single-triangle mesh `<object>` with the given id.
+    private func meshObjectXML(id: Int) -> String {
+        "<object id=\"\(id)\" type=\"model\"><mesh>"
+        + "<vertices><vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/><vertex x=\"0\" y=\"1\" z=\"0\"/></vertices>"
+        + "<triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\"/></triangles>"
+        + "</mesh></object>"
+    }
+
+    /// Wrap `<resources>`/`<build>` bodies into a model, zip it, and parse.
+    private func parseModel(resources: String, build: String) throws -> ParseResult {
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<model unit=\"millimeter\" xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">"
+            + "<resources>\(resources)</resources><build>\(build)</build></model>"
+        let zip = MiniZIP.createArchive(entries: [.init(path: "3D/3dmodel.model", data: Data(xml.utf8))])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try ThreeMFParser.parse(fileAt: url)
+    }
+
+    func testComponentAssemblyResolvesReferencedMesh() throws {
+        // Object 2 is a pure container that references mesh object 1 with a translation.
+        let resources = meshObjectXML(id: 1)
+            + "<object id=\"2\" type=\"model\"><components>"
+            + "<component objectid=\"1\" transform=\"1 0 0 0 1 0 0 0 1 10 20 30\"/>"
+            + "</components></object>"
+        let result = try parseModel(resources: resources, build: "<item objectid=\"2\"/>")
+
+        // The container resolves to exactly its one referenced mesh — not rendered
+        // twice, and not dropped (which was the pre-fix behavior).
+        XCTAssertEqual(result.items.count, 1)
+        XCTAssertEqual(result.items[0].mesh.vertices.count, 3)
+        let t = result.items[0].transform
+        XCTAssertEqual(t.columns.0.w, 10, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.1.w, 20, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.2.w, 30, accuracy: 1e-5)
+    }
+
+    func testComponentTransformComposesWithBuildItem() throws {
+        // Build item translates +5 on X; the component translates +7 on Y. They add.
+        let resources = meshObjectXML(id: 1)
+            + "<object id=\"2\" type=\"model\"><components>"
+            + "<component objectid=\"1\" transform=\"1 0 0 0 1 0 0 0 1 0 7 0\"/>"
+            + "</components></object>"
+        let result = try parseModel(
+            resources: resources,
+            build: "<item objectid=\"2\" transform=\"1 0 0 0 1 0 0 0 1 5 0 0\"/>"
+        )
+
+        XCTAssertEqual(result.items.count, 1)
+        let t = result.items[0].transform
+        XCTAssertEqual(t.columns.0.w, 5, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.1.w, 7, accuracy: 1e-5)
+    }
+
+    func testNestedComponentsCompose() throws {
+        // 3 → 2 → 1(mesh); each level adds a translation on a different axis.
+        let resources = meshObjectXML(id: 1)
+            + "<object id=\"2\" type=\"model\"><components>"
+            + "<component objectid=\"1\" transform=\"1 0 0 0 1 0 0 0 1 1 0 0\"/></components></object>"
+            + "<object id=\"3\" type=\"model\"><components>"
+            + "<component objectid=\"2\" transform=\"1 0 0 0 1 0 0 0 1 0 2 0\"/></components></object>"
+        let result = try parseModel(resources: resources, build: "<item objectid=\"3\"/>")
+
+        XCTAssertEqual(result.items.count, 1)
+        let t = result.items[0].transform
+        XCTAssertEqual(t.columns.0.w, 1, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.1.w, 2, accuracy: 1e-5)
+    }
+
+    func testComponentCycleTerminates() throws {
+        // Objects 1 and 2 reference each other and both hold a mesh. Resolution must
+        // terminate, rendering each mesh once rather than recursing forever.
+        let mesh = "<mesh><vertices>"
+            + "<vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/><vertex x=\"0\" y=\"1\" z=\"0\"/>"
+            + "</vertices><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\"/></triangles></mesh>"
+        let resources =
+            "<object id=\"1\" type=\"model\">\(mesh)<components><component objectid=\"2\"/></components></object>"
+            + "<object id=\"2\" type=\"model\">\(mesh)<components><component objectid=\"1\"/></components></object>"
+        let result = try parseModel(resources: resources, build: "<item objectid=\"1\"/>")
+
+        XCTAssertEqual(result.items.count, 2, "Each mesh in the cycle should render exactly once")
+    }
+
     // MARK: - Transform Parsing
 
     func testParseTransformIdentity() {

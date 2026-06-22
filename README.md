@@ -50,8 +50,9 @@ Or open `Preview3MF.xcodeproj` in Xcode and hit Cmd+R.
 
 1. Extracts all `.model` files from the archive (using [ZIPFoundation](https://github.com/weichsel/ZIPFoundation))
 2. Parses `<vertex>`, `<triangle>`, `<build>` items, materials, and metadata from the XML
-3. Builds SceneKit geometry with per-face normals for flat shading, applying each build item's transform
-4. Renders with a 3-point lighting setup, a build-plate grid, and an auto-framed camera
+3. Resolves `<component>` references so assembly objects expand to their part meshes with composed transforms
+4. Builds SceneKit geometry with per-face normals for flat shading, applying each build item's transform
+5. Renders with a 3-point lighting setup, a build-plate grid, and an auto-framed camera
 
 For Finder **thumbnails**, slicers usually bake a rendered PNG into the package — the thumbnail
 extension reuses that embedded image as a fast path and only falls back to SceneKit rendering when
