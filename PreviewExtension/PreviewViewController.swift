@@ -15,6 +15,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         sceneView.autoresizingMask = [.width, .height]
         sceneView.antialiasingMode = .multisampling4X
         sceneView.allowsCameraControl = true
+        // Keep the render loop running so the static settle period actually paints frames.
+        sceneView.isPlaying = true
         view.addSubview(sceneView)
 
         infoLabel = NSTextField(labelWithString: "")
@@ -46,6 +48,14 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             let appearance = currentAppearance
             let scene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
             sceneView.scene = scene
+            // Hold the auto-rotation still while the first frame uploads its geometry to
+            // the GPU. Without this the upload hitch lets the animation clock advance, and
+            // the rotation visibly jumps when the first frame finally paints. Resuming
+            // after a short settle starts the spin cleanly from the model's rest pose.
+            scene.isPaused = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.sceneView.scene?.isPaused = false
+            }
             infoLabel.stringValue = buildInfoString(result)
             infoLabel.textColor = appearance == .dark
                 ? NSColor(white: 0.8, alpha: 1.0)
