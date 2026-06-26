@@ -112,10 +112,8 @@ final class ThreeMFParser {
                 xmlData.append(chunk)
             }
 
-            let delegate = ModelXMLDelegate()
-            let parser = XMLParser(data: xmlData)
-            parser.delegate = delegate
-            guard parser.parse() else { continue }
+            let delegate = FastModelParser()
+            guard delegate.parse(xmlData) else { continue }
 
             for (id, obj) in delegate.objects {
                 if !obj.vertices.isEmpty {
@@ -680,6 +678,242 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
             let a = Float(value & 0xFF) / 255.0
             return SIMD4(r, g, b, a)
         }
+    }
+}
+
+/// A hand-written scanner for 3MF `<model>` XML that produces the same output as
+/// `ModelXMLDelegate` but far faster on large files.
+///
+/// Foundation's `XMLParser` builds a bridged `[String: String]` attribute dictionary
+/// for every element; with millions of `<vertex>`/`<triangle>` elements that allocation
+/// dominates parse time. This walks the raw UTF-8 bytes and reads numbers directly with
+/// `strtod`/`strtol`, allocating nothing per element. (3MF always uses `.` as the decimal
+/// separator, matching the process's default C numeric locale.)
+final class FastModelParser {
+    var objects: [Int: ParsedObject] = [:]
+    var buildItems: [(objectID: Int, transform: simd_float4x4)] = []
+    var metadata: [String: String] = [:]
+
+    private var materialGroups: [Int: [SIMD4<Float>]] = [:]
+    private var currentGroupID: Int?
+    private var currentGroupColors: [SIMD4<Float>] = []
+
+    private var currentObjectID: Int?
+    private var currentVertices: [SIMD3<Float>] = []
+    private var currentTriangles: [(UInt32, UInt32, UInt32)] = []
+    private var currentTriangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
+    private var currentComponents: [(objectID: Int, transform: simd_float4x4)] = []
+    private var objectPID: Int?
+    private var objectPIndex: Int?
+    private var inBuild = false
+
+    private let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
+
+    func parse(_ data: Data) -> Bool {
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            let base = raw.baseAddress!.assumingMemoryBound(to: CChar.self)
+            let n = bytes.count
+
+            let lt = UInt8(ascii: "<"), gt = UInt8(ascii: ">"), slash = UInt8(ascii: "/")
+            let quote = UInt8(ascii: "\""), eq = UInt8(ascii: "=")
+            @inline(__always) func isSpace(_ b: UInt8) -> Bool {
+                b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D
+            }
+            @inline(__always) func f(_ vs: Int) -> Float { Float(strtod(base + vs, nil)) }
+            @inline(__always) func d(_ vs: Int) -> Int { strtol(base + vs, nil, 10) }
+            @inline(__always) func nameIs(_ ns: Int, _ nl: Int, _ s: StaticString) -> Bool {
+                guard nl == s.utf8CodeUnitCount else { return false }
+                let p = s.utf8Start
+                var k = 0
+                while k < nl { if bytes[ns + k] != p[k] { return false }; k += 1 }
+                return true
+            }
+
+            // Visit each `name="value"` in the attribute region [start, end).
+            @inline(__always) func forEachAttr(_ start: Int, _ end: Int, _ body: (Int, Int, Int) -> Void) {
+                var p = start
+                while p < end {
+                    while p < end, isSpace(bytes[p]) { p += 1 }
+                    if p >= end || bytes[p] == slash || bytes[p] == gt { break }
+                    let ns = p
+                    while p < end, bytes[p] != eq, !isSpace(bytes[p]) { p += 1 }
+                    let nl = p - ns
+                    while p < end, bytes[p] != quote { p += 1 }
+                    if p >= end { break }
+                    p += 1
+                    let vs = p
+                    while p < end, bytes[p] != quote { p += 1 }
+                    body(ns, nl, vs)
+                    p += 1
+                }
+            }
+            @inline(__always) func str(_ vs: Int, _ ve: Int) -> String {
+                String(decoding: UnsafeBufferPointer(rebasing: bytes[vs..<ve]), as: UTF8.self)
+            }
+            @inline(__always) func valueEnd(_ vs: Int) -> Int {
+                var e = vs; while e < n, bytes[e] != quote { e += 1 }; return e
+            }
+
+            var i = 0
+            var metaName: String?
+            var metaTextStart = 0
+
+            while i < n {
+                if bytes[i] != lt { i += 1; continue }
+                let after = i + 1
+                if after >= n { break }
+                let c0 = bytes[after]
+                if c0 == UInt8(ascii: "!") || c0 == UInt8(ascii: "?") {
+                    var k = after; while k < n, bytes[k] != gt { k += 1 }; i = k + 1; continue
+                }
+                let isClose = c0 == slash
+                let ns = isClose ? after + 1 : after
+                var j = ns
+                while j < n {
+                    let b = bytes[j]
+                    if b == gt || b == slash || isSpace(b) { break }
+                    j += 1
+                }
+                let nl = j - ns
+                var k = j
+                while k < n, bytes[k] != gt { k += 1 }   // k at '>'
+                let attrEnd = k
+
+                if isClose {
+                    if nameIs(ns, nl, "object") {
+                        if let id = currentObjectID {
+                            objects[id] = ParsedObject(vertices: currentVertices,
+                                                       triangles: currentTriangles,
+                                                       triangleColors: currentTriangleColors,
+                                                       components: currentComponents)
+                        }
+                        currentObjectID = nil; currentVertices = []; currentTriangles = []
+                        currentTriangleColors = nil; currentComponents = []
+                        objectPID = nil; objectPIndex = nil
+                    } else if nameIs(ns, nl, "basematerials") {
+                        if let id = currentGroupID { materialGroups[id] = currentGroupColors }
+                        currentGroupID = nil; currentGroupColors = []
+                    } else if nameIs(ns, nl, "metadata") {
+                        if let name = metaName {
+                            let text = str(metaTextStart, i).trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !text.isEmpty { metadata[name] = Self.decodeEntities(text) }
+                        }
+                        metaName = nil
+                    } else if nameIs(ns, nl, "build") {
+                        inBuild = false
+                    }
+                    i = k + 1
+                    continue
+                }
+
+                if nameIs(ns, nl, "vertex") {
+                    var x: Float = 0, y: Float = 0, z: Float = 0
+                    forEachAttr(j, attrEnd) { an, al, vs in
+                        if al == 1 {
+                            switch bytes[an] {
+                            case 0x78: x = f(vs); case 0x79: y = f(vs); case 0x7A: z = f(vs)
+                            default: break
+                            }
+                        }
+                    }
+                    currentVertices.append(SIMD3(x, y, z))
+                } else if nameIs(ns, nl, "triangle") {
+                    var v1 = -1, v2 = -1, v3 = -1
+                    var pid: Int? = nil, p1: Int? = nil, p2: Int? = nil, p3: Int? = nil
+                    forEachAttr(j, attrEnd) { an, al, vs in
+                        if al == 2, bytes[an] == 0x76 {           // v1/v2/v3
+                            switch bytes[an + 1] { case 0x31: v1 = d(vs); case 0x32: v2 = d(vs); case 0x33: v3 = d(vs); default: break }
+                        } else if al == 2, bytes[an] == 0x70 {    // p1/p2/p3
+                            switch bytes[an + 1] { case 0x31: p1 = d(vs); case 0x32: p2 = d(vs); case 0x33: p3 = d(vs); default: break }
+                        } else if al == 3, nameIs(an, al, "pid") {
+                            pid = d(vs)
+                        }
+                    }
+                    if v1 >= 0, v2 >= 0, v3 >= 0 {
+                        currentTriangles.append((UInt32(v1), UInt32(v2), UInt32(v3)))
+                        if !materialGroups.isEmpty {
+                            if currentTriangleColors == nil {
+                                currentTriangleColors = Array(repeating: (defaultGray, defaultGray, defaultGray),
+                                                              count: currentTriangles.count - 1)
+                            }
+                            let triPID = pid ?? objectPID
+                            var c0 = defaultGray, c1 = defaultGray, c2 = defaultGray
+                            if let pid = triPID, let group = materialGroups[pid] {
+                                let i1 = p1 ?? objectPIndex
+                                let i2 = p2 ?? i1
+                                let i3 = p3 ?? i1
+                                if let idx = i1, idx >= 0, idx < group.count { c0 = group[idx] }
+                                if let idx = i2, idx >= 0, idx < group.count { c1 = group[idx] }
+                                if let idx = i3, idx >= 0, idx < group.count { c2 = group[idx] }
+                            }
+                            currentTriangleColors!.append((c0, c1, c2))
+                        }
+                    }
+                } else if nameIs(ns, nl, "object") {
+                    forEachAttr(j, attrEnd) { an, al, vs in
+                        if nameIs(an, al, "id") { currentObjectID = d(vs) }
+                        else if nameIs(an, al, "pid") { objectPID = d(vs) }
+                        else if nameIs(an, al, "pindex") { objectPIndex = d(vs) }
+                    }
+                    currentVertices = []; currentTriangles = []; currentTriangleColors = nil; currentComponents = []
+                } else if nameIs(ns, nl, "component") {
+                    if currentObjectID != nil {
+                        var objectID: Int? = nil
+                        var transform = matrix_identity_float4x4
+                        forEachAttr(j, attrEnd) { an, al, vs in
+                            if nameIs(an, al, "objectid") { objectID = d(vs) }
+                            else if nameIs(an, al, "transform") { transform = ModelXMLDelegate.parseTransform(str(vs, valueEnd(vs))) }
+                        }
+                        if let objectID { currentComponents.append((objectID: objectID, transform: transform)) }
+                    }
+                } else if nameIs(ns, nl, "item") {
+                    if inBuild {
+                        var objectID: Int? = nil
+                        var transform = matrix_identity_float4x4
+                        forEachAttr(j, attrEnd) { an, al, vs in
+                            if nameIs(an, al, "objectid") { objectID = d(vs) }
+                            else if nameIs(an, al, "transform") { transform = ModelXMLDelegate.parseTransform(str(vs, valueEnd(vs))) }
+                        }
+                        if let objectID { buildItems.append((objectID: objectID, transform: transform)) }
+                    }
+                } else if nameIs(ns, nl, "build") {
+                    inBuild = true
+                } else if nameIs(ns, nl, "base") {
+                    forEachAttr(j, attrEnd) { an, al, vs in
+                        if nameIs(an, al, "displaycolor"),
+                           let color = ModelXMLDelegate.parseDisplayColor(str(vs, valueEnd(vs))) {
+                            currentGroupColors.append(color)
+                        }
+                    }
+                } else if nameIs(ns, nl, "basematerials") {
+                    forEachAttr(j, attrEnd) { an, al, vs in
+                        if nameIs(an, al, "id") { currentGroupID = d(vs); currentGroupColors = [] }
+                    }
+                } else if nameIs(ns, nl, "metadata") {
+                    var name: String?
+                    forEachAttr(j, attrEnd) { an, al, vs in
+                        if nameIs(an, al, "name") { name = str(vs, valueEnd(vs)) }
+                    }
+                    // Self-closing (<metadata .../>) carries no text.
+                    if attrEnd > j, bytes[attrEnd - 1] != slash { metaName = name; metaTextStart = k + 1 }
+                }
+
+                i = k + 1
+            }
+        }
+        return true
+    }
+
+    /// Minimal XML entity decode for metadata text (not in the hot path).
+    private static func decodeEntities(_ s: String) -> String {
+        guard s.contains("&") else { return s }
+        var r = s
+        for (e, c) in [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""),
+                       ("&apos;", "'"), ("&#34;", "\""), ("&#39;", "'")] {
+            r = r.replacingOccurrences(of: e, with: c)
+        }
+        return r
     }
 }
 

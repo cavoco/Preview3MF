@@ -229,6 +229,31 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(mesh.triangles[0].2, 2)
     }
 
+    func testParsesFractionalAndExponentCoordinates() throws {
+        // Lock the byte-scanner's number parsing: fractions, negatives, exponents, big values.
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">"
+            + "<resources><object id=\"1\" type=\"model\"><mesh><vertices>"
+            + "<vertex x=\"1.5\" y=\"-2.25\" z=\"3.0e1\"/>"
+            + "<vertex x=\"0\" y=\"0\" z=\"0\"/>"
+            + "<vertex x=\"-0.001\" y=\"1000000\" z=\"2.5\"/>"
+            + "</vertices><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\"/></triangles>"
+            + "</mesh></object></resources><build><item objectid=\"1\"/></build></model>"
+        let zip = MiniZIP.createArchive(entries: [.init(path: "3D/3dmodel.model", data: Data(xml.utf8))])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let v = result.items[0].mesh.vertices
+        XCTAssertEqual(v.count, 3)
+        XCTAssertEqual(v[0].x, 1.5, accuracy: 1e-6)
+        XCTAssertEqual(v[0].y, -2.25, accuracy: 1e-6)
+        XCTAssertEqual(v[0].z, 30, accuracy: 1e-4)
+        XCTAssertEqual(v[2].x, -0.001, accuracy: 1e-6)
+        XCTAssertEqual(v[2].y, 1_000_000, accuracy: 1)
+        XCTAssertEqual(result.items[0].mesh.triangles[0].2, 2)
+    }
+
     // MARK: - Malformed Archive Tests
 
     func testGarbageDataThrows() throws {
