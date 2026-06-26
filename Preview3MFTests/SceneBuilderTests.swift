@@ -220,11 +220,13 @@ final class SceneBuilderTests: XCTestCase {
 
         let container = try findContainerNode(in: scene)
 
-        // Bounding box center: ((2+6)/2, (4+8)/2, (6+12)/2) = (4, 6, 9)
+        // Model-space bbox center is (4, 6, 9). The assembly is rotated -90° about X
+        // (Z-up → Y-up), mapping (x, y, z) → (x, z, -y), so the center becomes
+        // (4, 9, -6) and the container is positioned at its negation.
         let pos = container.position
         XCTAssertEqual(pos.x, -4, accuracy: 0.01)
-        XCTAssertEqual(pos.y, -6, accuracy: 0.01)
-        XCTAssertEqual(pos.z, -9, accuracy: 0.01)
+        XCTAssertEqual(pos.y, -9, accuracy: 0.01)
+        XCTAssertEqual(pos.z, 6, accuracy: 0.01)
     }
 
     func testMaterialProperties() throws {

@@ -550,10 +550,10 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(t.columns.0.x, 1, accuracy: 1e-5)
         XCTAssertEqual(t.columns.1.y, 1, accuracy: 1e-5)
         XCTAssertEqual(t.columns.2.z, 1, accuracy: 1e-5)
-        // Translation is in the last row of 3MF format → column 0-2 w components
-        XCTAssertEqual(t.columns.0.w, 10, accuracy: 1e-5)
-        XCTAssertEqual(t.columns.1.w, 20, accuracy: 1e-5)
-        XCTAssertEqual(t.columns.2.w, 30, accuracy: 1e-5)
+        // Transposed to column-vector form → translation lives in the last column.
+        XCTAssertEqual(t.columns.3.x, 10, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.y, 20, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.z, 30, accuracy: 1e-5)
     }
 
     func testBuildItemsWithoutTransform() throws {
@@ -599,9 +599,9 @@ final class ThreeMFParserTests: XCTestCase {
         let items = result.items
         XCTAssertEqual(items.count, 2)
         // First item at origin
-        XCTAssertEqual(items[0].transform.columns.0.w, 0, accuracy: 1e-5)
+        XCTAssertEqual(items[0].transform.columns.3.x, 0, accuracy: 1e-5)
         // Second item translated 50 units on X
-        XCTAssertEqual(items[1].transform.columns.0.w, 50, accuracy: 1e-5)
+        XCTAssertEqual(items[1].transform.columns.3.x, 50, accuracy: 1e-5)
     }
 
     // MARK: - Component / Assembly Tests
@@ -638,9 +638,9 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.items[0].mesh.vertices.count, 3)
         let t = result.items[0].transform
-        XCTAssertEqual(t.columns.0.w, 10, accuracy: 1e-5)
-        XCTAssertEqual(t.columns.1.w, 20, accuracy: 1e-5)
-        XCTAssertEqual(t.columns.2.w, 30, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.x, 10, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.y, 20, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.z, 30, accuracy: 1e-5)
     }
 
     func testComponentTransformComposesWithBuildItem() throws {
@@ -656,8 +656,8 @@ final class ThreeMFParserTests: XCTestCase {
 
         XCTAssertEqual(result.items.count, 1)
         let t = result.items[0].transform
-        XCTAssertEqual(t.columns.0.w, 5, accuracy: 1e-5)
-        XCTAssertEqual(t.columns.1.w, 7, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.x, 5, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.y, 7, accuracy: 1e-5)
     }
 
     func testNestedComponentsCompose() throws {
@@ -671,8 +671,8 @@ final class ThreeMFParserTests: XCTestCase {
 
         XCTAssertEqual(result.items.count, 1)
         let t = result.items[0].transform
-        XCTAssertEqual(t.columns.0.w, 1, accuracy: 1e-5)
-        XCTAssertEqual(t.columns.1.w, 2, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.x, 1, accuracy: 1e-5)
+        XCTAssertEqual(t.columns.3.y, 2, accuracy: 1e-5)
     }
 
     func testComponentCycleTerminates() throws {
@@ -687,6 +687,27 @@ final class ThreeMFParserTests: XCTestCase {
         let result = try parseModel(resources: resources, build: "<item objectid=\"1\"/>")
 
         XCTAssertEqual(result.items.count, 2, "Each mesh in the cycle should render exactly once")
+    }
+
+    func testComponentPlacementMatchesBambuLayout() throws {
+        // Real values from a Bambu Studio export (error.3mf): a build item places the
+        // assembly on the plate, and a component offsets a part within it. The part's
+        // world position must be the sum of both translations — the regression that
+        // made multi-part plates collapse to the origin.
+        let resources = meshObjectXML(id: 1)
+            + "<object id=\"3\" type=\"model\"><components>"
+            + "<component objectid=\"1\" transform=\"1 0 0 0 1 0 0 0 1 -55.5084801 2.99727535 0\"/>"
+            + "</components></object>"
+        let result = try parseModel(
+            resources: resources,
+            build: "<item objectid=\"3\" transform=\"1 0 0 0 1 0 0 0 1 146.72148 99.74836 4.40000021\"/>"
+        )
+
+        XCTAssertEqual(result.items.count, 1)
+        let t = result.items[0].transform
+        XCTAssertEqual(t.columns.3.x, 146.72148 - 55.5084801, accuracy: 1e-3)
+        XCTAssertEqual(t.columns.3.y, 99.74836 + 2.99727535, accuracy: 1e-3)
+        XCTAssertEqual(t.columns.3.z, 4.40000021, accuracy: 1e-3)
     }
 
     // MARK: - Transform Parsing

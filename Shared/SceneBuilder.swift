@@ -16,12 +16,16 @@ final class SceneBuilder {
             ? NSColor(white: 0.15, alpha: 1.0)
             : NSColor.white
 
+        // 3MF is Z-up; SceneKit is Y-up. Rotate the whole assembly -90° about X so the
+        // build plate lies flat in the XZ plane and the print height runs up the screen.
+        let zUpToYUp = simd_float4x4(simd_quatf(angle: -.pi / 2, axis: SIMD3(1, 0, 0)))
+
         // Container holds all build items so we can center and rotate them together
         let containerNode = SCNNode()
         for item in items {
             let geometry = buildGeometry(from: item.mesh)
             let node = SCNNode(geometry: geometry)
-            node.simdTransform = item.transform
+            node.simdTransform = zUpToYUp * item.transform
             containerNode.addChildNode(node)
         }
 

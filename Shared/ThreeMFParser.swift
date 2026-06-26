@@ -178,8 +178,8 @@ final class ThreeMFParser {
                 var nextVisited = visited
                 nextVisited.insert(objectID)
                 for component in components {
-                    // A component transform is relative to its parent, so apply it first.
-                    out += expand(component.objectID, component.transform * transform, nextVisited)
+                    // Column-vector nesting: world = parent · component (parent on the left).
+                    out += expand(component.objectID, transform * component.transform, nextVisited)
                 }
             }
             return out
@@ -638,21 +638,26 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
     }
 
     /// Parse a 3MF `transform` attribute (12 space-separated floats) into a 4x4 matrix.
-    /// Format: "m00 m01 m02 m10 m11 m12 m20 m21 m22 m30 m31 m32"
-    /// Maps to the affine matrix:
-    /// | m00 m01 m02 0 |
-    /// | m10 m11 m12 0 |
-    /// | m20 m21 m22 0 |
-    /// | m30 m31 m32 1 |
+    /// Format: "m00 m01 m02 m10 m11 m12 m20 m21 m22 m30 m31 m32".
+    ///
+    /// 3MF uses a row-vector convention — a point is transformed as `p · M`, so the
+    /// translation lives in the bottom row (m30 m31 m32). SceneKit's `simdTransform`
+    /// is column-major and applies `M · p`, with translation in the last column.
+    /// We therefore transpose into:
+    /// | m00 m10 m20 m30 |
+    /// | m01 m11 m21 m31 |
+    /// | m02 m12 m22 m32 |
+    /// |  0   0   0   1  |
+    /// so the matrix can be assigned directly to a node's transform.
     static func parseTransform(_ str: String) -> simd_float4x4 {
         let values = str.split(separator: " ").compactMap { Float($0) }
         guard values.count == 12 else { return matrix_identity_float4x4 }
 
         return simd_float4x4(
-            SIMD4(values[0], values[3], values[6], values[9]),   // column 0
-            SIMD4(values[1], values[4], values[7], values[10]),  // column 1
-            SIMD4(values[2], values[5], values[8], values[11]),  // column 2
-            SIMD4(0, 0, 0, 1)                                    // column 3
+            SIMD4(values[0], values[1], values[2], 0),       // column 0
+            SIMD4(values[3], values[4], values[5], 0),       // column 1
+            SIMD4(values[6], values[7], values[8], 0),       // column 2
+            SIMD4(values[9], values[10], values[11], 1)      // column 3 (translation)
         )
     }
 
