@@ -102,7 +102,11 @@ struct ContentView: View {
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
-            scene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
+            let newScene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
+            // Hold the spin still briefly so the first-frame upload doesn't jump (as in the preview).
+            newScene.isPaused = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { newScene.isPaused = false }
+            scene = newScene
             parseResult = result
         } catch {
             errorMessage = error.localizedDescription
