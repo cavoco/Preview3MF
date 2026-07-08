@@ -7,6 +7,9 @@ on:
 permissions:
   contents: write
 
+env:
+  TEAM_ID: XPBX8CKBGU
+
 jobs:
   build-and-release:
     runs-on: macos-15
@@ -16,26 +19,83 @@ jobs:
       - name: Extract version from tag
         run: echo "TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
 
-      - name: Build Release
+      - name: Import Developer ID certificate
+        env:
+          CERT_P12: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          # Create and unlock a throwaway keychain, and put it first in the search list.
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          # Import the Developer ID Application cert + private key.
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+          # Allow codesign to use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+          echo "Signing identity: $IDENTITY"
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build universal, signed Release
         run: |
           xcodebuild \
             -scheme Preview3MF \
             -configuration Release \
             -derivedDataPath build/DerivedData \
-            -arch "$(uname -m)" \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_ALLOWED=YES \
-            ONLY_ACTIVE_ARCH=YES \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp --options runtime" \
             -quiet
 
-      - name: Zip app bundle
+      - name: Locate the built app
         run: |
           APP_PATH=$(find build/DerivedData -name "Preview3MF.app" -type d | head -1)
-          ditto -c -k --keepParent "$APP_PATH" "Preview3MF-${TAG}-arm64.zip"
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo "Built: $APP_PATH"
+          # Sanity-check: universal binary + valid signature on the app and its extensions.
+          lipo -info "$APP_PATH/Contents/MacOS/Preview3MF"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+      - name: Notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          # notarytool needs a zip/dmg/pkg to submit.
+          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait
+
+      - name: Staple ticket
+        run: |
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+
+      - name: Zip stapled app
+        run: |
+          ditto -c -k --keepParent "$APP_PATH" "Preview3MF-${TAG}-universal.zip"
 
       - name: Create GitHub Release
         run: |
-          gh release create "$TAG" "Preview3MF-${TAG}-arm64.zip" \
+          gh release create "$TAG" "Preview3MF-${TAG}-universal.zip" \
             --title "$TAG" \
             --generate-notes
         env:

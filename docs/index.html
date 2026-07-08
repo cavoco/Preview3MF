@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Preview3MF — Quick Look for .3mf files on macOS</title>
+  <meta name="description" content="A macOS Quick Look extension for .3mf files. Press Space in Finder to see a 3D preview of any model — no slicer needed.">
+  <meta property="og:title" content="Preview3MF">
+  <meta property="og:description" content="Press Space on any .3mf file in Finder to see a 3D preview — no slicer needed.">
+  <meta property="og:image" content="preview.png">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>">
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-soft: #f5f5f7;
+      --fg: #1d1d1f;
+      --fg-soft: #565660;
+      --border: #e2e2e7;
+      --accent: #0a84ff;
+      --accent-fg: #ffffff;
+      --card: #ffffff;
+      --shadow: 0 12px 40px rgba(0,0,0,.10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0b0f;
+        --bg-soft: #16161c;
+        --fg: #f5f5f7;
+        --fg-soft: #a1a1aa;
+        --border: #26262e;
+        --accent: #0a84ff;
+        --accent-fg: #ffffff;
+        --card: #16161c;
+        --shadow: 0 12px 40px rgba(0,0,0,.5);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+    /* Hero */
+    header { padding: 72px 0 40px; text-align: center; }
+    .badge {
+      display: inline-block; font-size: 13px; font-weight: 600;
+      color: var(--fg-soft); background: var(--bg-soft);
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 5px 14px; margin-bottom: 22px;
+    }
+    h1 { font-size: clamp(38px, 7vw, 60px); line-height: 1.05; letter-spacing: -0.02em; margin: 0 0 16px; }
+    .tagline { font-size: clamp(17px, 3vw, 21px); color: var(--fg-soft); max-width: 620px; margin: 0 auto 32px; }
+    .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 16px; font-weight: 600; padding: 13px 26px; border-radius: 12px;
+      border: 1px solid transparent; transition: transform .08s ease, opacity .2s ease;
+    }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); }
+    .btn-primary { background: var(--accent); color: var(--accent-fg); }
+    .btn-secondary { background: var(--bg-soft); color: var(--fg); border-color: var(--border); }
+    .req { margin-top: 14px; font-size: 13px; color: var(--fg-soft); }
+
+    /* Screenshot */
+    .shot { margin: 48px auto 0; max-width: 780px; }
+    .shot img {
+      width: 100%; height: auto; display: block; border-radius: 16px;
+      border: 1px solid var(--border); box-shadow: var(--shadow);
+    }
+
+    /* Sections */
+    section { padding: 64px 0; }
+    h2 { font-size: clamp(26px, 4vw, 34px); letter-spacing: -0.01em; margin: 0 0 8px; text-align: center; }
+    .section-sub { text-align: center; color: var(--fg-soft); margin: 0 auto 44px; max-width: 560px; }
+
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+    .feature {
+      background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px;
+    }
+    .feature .ico { font-size: 26px; margin-bottom: 12px; }
+    .feature h3 { margin: 0 0 6px; font-size: 17px; }
+    .feature p { margin: 0; color: var(--fg-soft); font-size: 15px; }
+
+    /* Install */
+    .install { background: var(--bg-soft); border-radius: 20px; padding: 40px; border: 1px solid var(--border); }
+    ol.steps { counter-reset: step; list-style: none; padding: 0; margin: 0; max-width: 660px; margin-inline: auto; }
+    ol.steps li {
+      counter-increment: step; position: relative; padding: 0 0 22px 46px; font-size: 16px;
+    }
+    ol.steps li::before {
+      content: counter(step); position: absolute; left: 0; top: 0;
+      width: 30px; height: 30px; border-radius: 50%;
+      background: var(--accent); color: var(--accent-fg);
+      display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700;
+    }
+    ol.steps li:last-child { padding-bottom: 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px;
+    }
+    .tip { margin-top: 26px; font-size: 14px; color: var(--fg-soft); border-top: 1px solid var(--border); padding-top: 20px; }
+
+    /* How it works */
+    .how { max-width: 680px; margin: 0 auto; color: var(--fg-soft); }
+    .how p { margin: 0 0 16px; }
+    .how strong { color: var(--fg); }
+
+    footer { text-align: center; padding: 48px 0 60px; color: var(--fg-soft); font-size: 14px; border-top: 1px solid var(--border); }
+    footer a { color: var(--fg-soft); text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="badge">macOS Quick Look extension</div>
+      <h1>Preview <code style="font-size:.8em">.3mf</code> files instantly</h1>
+      <p class="tagline">Press <strong>Space</strong> on any <code>.3mf</code> file in Finder to see a 3D preview of the model — no slicer needed.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/cavoco/Preview3MF/releases/latest">↓ Download for macOS</a>
+        <a class="btn btn-secondary" href="https://github.com/cavoco/Preview3MF">View on GitHub</a>
+      </div>
+      <p class="req">Free &amp; open source · Universal (Apple Silicon + Intel) · Signed &amp; notarized · macOS 13+</p>
+      <div class="shot">
+        <img src="preview.png" alt="Preview3MF showing a 3D model on a build-plate grid in Quick Look">
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="wrap">
+      <h2>Everything you need to peek inside a print</h2>
+      <p class="section-sub">A proper 3D preview right in Finder and Quick Look, plus rendered thumbnails on your icons.</p>
+      <div class="features">
+        <div class="feature"><div class="ico">🔎</div><h3>Quick Look integration</h3><p>Press Space in Finder — the model appears, no app to open.</p></div>
+        <div class="feature"><div class="ico">🧊</div><h3>Real 3D rendering</h3><p>SceneKit with proper lighting, shading, and materials.</p></div>
+        <div class="feature"><div class="ico">🌀</div><h3>Auto-rotating</h3><p>Spins around the vertical axis so you see every side.</p></div>
+        <div class="feature"><div class="ico">🖱️</div><h3>Interactive controls</h3><p>Orbit and zoom with your mouse or trackpad in the preview.</p></div>
+        <div class="feature"><div class="ico">🎨</div><h3>Color support</h3><p>Renders per-object and per-triangle material colors when present.</p></div>
+        <div class="feature"><div class="ico">📐</div><h3>Model info overlay</h3><p>Triangle count, object count, and dimensions parsed from the file.</p></div>
+        <div class="feature"><div class="ico">🖼️</div><h3>Finder thumbnails</h3><p>Rendered icons for <code>.3mf</code> files, reusing the slicer's embedded preview when available.</p></div>
+        <div class="feature"><div class="ico">🧩</div><h3>Multi-object &amp; assemblies</h3><p>Handles Bambu Studio, PrusaSlicer, and component assemblies.</p></div>
+        <div class="feature"><div class="ico">🌗</div><h3>Dark mode</h3><p>Preview and app adapt to your system appearance.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="install">
+        <h2>Installation</h2>
+        <p class="section-sub">Takes about a minute.</p>
+        <ol class="steps">
+          <li>Download the latest release and unzip it.</li>
+          <li>Move <strong>Preview3MF.app</strong> to <code>/Applications</code>.</li>
+          <li>Launch it once — this registers the Quick Look extensions.</li>
+          <li>Go to <strong>System Settings → Privacy &amp; Security → Extensions → Quick Look</strong> and enable both <strong>PreviewExtension</strong> and <strong>ThumbnailExtension</strong>.</li>
+          <li>That's it — press Space on any <code>.3mf</code> file in Finder.</li>
+        </ol>
+        <p class="tip">💡 If Quick Look doesn't pick it up immediately, run <code>qlmanage -r</code> in Terminal to reset the Quick Look cache.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>How it works</h2>
+      <p class="section-sub">A <code>.3mf</code> file is a ZIP archive of XML model data.</p>
+      <div class="how">
+        <p><strong>Extract &amp; parse.</strong> Preview3MF pulls the <code>.model</code> files from the archive and reads the vertices, triangles, build items, materials, and metadata.</p>
+        <p><strong>Resolve assemblies.</strong> Component references are expanded so assembly objects become their part meshes with composed transforms.</p>
+        <p><strong>Render.</strong> It builds SceneKit geometry with per-face normals for flat shading, a build-plate grid, three-point lighting, and an auto-framed camera.</p>
+        <p><strong>Thumbnails.</strong> Slicers usually bake a rendered PNG into the package — the thumbnail extension reuses that as a fast path and only falls back to SceneKit when none is present.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p>Preview3MF is free and open source, released under the MIT License.</p>
+      <p><a href="https://github.com/cavoco/Preview3MF">GitHub</a> · <a href="https://github.com/cavoco/Preview3MF/releases/latest">Releases</a> · <a href="https://github.com/cavoco/Preview3MF/issues">Report an issue</a></p>
+    </div>
+  </footer>
+</body>
+</html>

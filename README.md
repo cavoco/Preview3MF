@@ -1,5 +1,8 @@
 # Preview3MF
 
+[![Download](https://img.shields.io/github/v/release/cavoco/Preview3MF?label=Download&sort=semver)](https://github.com/cavoco/Preview3MF/releases/latest)
+[![Website](https://img.shields.io/badge/Website-cavoco.github.io%2FPreview3MF-blue)](https://cavoco.github.io/Preview3MF/)
+
 A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press Space on any `.3mf` file in Finder to see a 3D preview of the model — no slicer needed.
 
 <p align="center">
