@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch: {}   # allow manual runs to debug signing/notarization without cutting a tag
 
 permissions:
   contents: write
@@ -17,7 +18,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Extract version from tag
-        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+        run: |
+          # Tag pushes set a real version; manual dispatch runs use a throwaway tag.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+          else
+            echo "TAG=dev-notarize-test" >> "$GITHUB_ENV"
+          fi
 
       - name: Import Developer ID certificate
         env:
@@ -78,15 +85,44 @@ jobs:
         run: |
           # notarytool needs a zip/dmg/pkg to submit.
           ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/notarize.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+
+          # Submit and capture the submission id. notarytool submit --wait exits 0 even
+          # when Apple *rejects* the build, so we must inspect the status ourselves.
+          SUBMIT_JSON=$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$TEAM_ID" \
-            --wait
+            --output-format json \
+            --wait)
+          echo "$SUBMIT_JSON"
+
+          SUBMISSION_ID=$(echo "$SUBMIT_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+          STATUS=$(echo "$SUBMIT_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["status"])')
+          echo "Notarization status: $STATUS (submission $SUBMISSION_ID)"
+
+          # Always dump Apple's per-issue log — it names the exact file + reason on rejection.
+          echo "----- notarytool log -----"
+          xcrun notarytool log "$SUBMISSION_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$TEAM_ID" || true
+
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization failed with status: $STATUS"
+            exit 1
+          fi
 
       - name: Staple ticket
         run: |
-          xcrun stapler staple "$APP_PATH"
+          # Apple's ticket-distribution (CloudKit) can lag a few seconds behind an
+          # Accepted verdict, so retry the staple until the ticket is available.
+          for attempt in 1 2 3 4 5 6; do
+            if xcrun stapler staple "$APP_PATH"; then
+              break
+            fi
+            echo "Staple attempt $attempt failed (ticket not propagated yet); retrying in 20s..."
+            sleep 20
+          done
           xcrun stapler validate "$APP_PATH"
 
       - name: Zip stapled app
@@ -94,6 +130,7 @@ jobs:
           ditto -c -k --keepParent "$APP_PATH" "Preview3MF-${TAG}-universal.zip"
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           gh release create "$TAG" "Preview3MF-${TAG}-universal.zip" \
             --title "$TAG" \
