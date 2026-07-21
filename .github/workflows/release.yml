@@ -67,6 +67,7 @@ jobs:
             CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             OTHER_CODE_SIGN_FLAGS="--timestamp --options runtime" \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
             -quiet
 
       - name: Locate the built app
@@ -77,6 +78,14 @@ jobs:
           # Sanity-check: universal binary + valid signature on the app and its extensions.
           lipo -info "$APP_PATH/Contents/MacOS/Preview3MF"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          # Notarization rejects any binary carrying the debug get-task-allow entitlement.
+          # Fail fast here rather than after a slow round-trip to Apple.
+          while IFS= read -r bin; do
+            if codesign -d --entitlements - --xml "$bin" 2>/dev/null | grep -q "get-task-allow"; then
+              echo "::error::$bin still carries com.apple.security.get-task-allow"
+              exit 1
+            fi
+          done < <(find "$APP_PATH" -type f -perm +111 -path "*/MacOS/*")
 
       - name: Notarize
         env:
