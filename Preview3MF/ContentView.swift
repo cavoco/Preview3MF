@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import SceneKit
+import AppKit
 
 struct ContentView: View {
     @State private var droppedFileURL: URL?
@@ -54,7 +55,7 @@ struct ContentView: View {
             Divider()
 
             if let scene = scene {
-                SceneView(scene: scene, options: [.allowsCameraControl, .autoenablesDefaultLighting])
+                ZoomableSceneView(scene: scene)
                     .frame(minHeight: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
@@ -178,5 +179,71 @@ struct StatItem: View {
             Text(label)
                 .foregroundColor(.secondary)
         }
+    }
+}
+
+/// Hosts a SceneKit scene with orbit + pinch (built-in) plus scroll-wheel zoom.
+/// SwiftUI's `SceneView` doesn't expose the underlying `SCNView`, so we wrap our own
+/// `ZoomableSCNView` to intercept the scroll wheel.
+struct ZoomableSceneView: NSViewRepresentable {
+    let scene: SCNScene
+
+    func makeNSView(context: Context) -> ZoomableSCNView {
+        let view = ZoomableSCNView()
+        view.allowsCameraControl = true
+        view.autoenablesDefaultLighting = true
+        view.antialiasingMode = .multisampling4X
+        view.backgroundColor = .clear
+        view.isPlaying = true   // keep rendering so the model keeps auto-rotating
+        view.scene = scene
+        return view
+    }
+
+    func updateNSView(_ nsView: ZoomableSCNView, context: Context) {
+        if nsView.scene !== scene {
+            nsView.scene = scene
+        }
+    }
+}
+
+/// An `SCNView` that adds scroll-wheel zoom on top of SceneKit's built-in camera control.
+/// The default controller handles orbit (drag) and trackpad pinch, but ignores the scroll
+/// wheel — this dollies the camera toward/away from its target so mouse users can zoom too.
+final class ZoomableSCNView: SCNView {
+
+    /// The initial framing distance, captured on first scroll, used to bound zoom range.
+    private var baselineDistance: CGFloat?
+
+    override func scrollWheel(with event: NSEvent) {
+        let controller = defaultCameraController
+        guard allowsCameraControl, let pov = controller.pointOfView else {
+            super.scrollWheel(with: event)
+            return
+        }
+
+        // Current distance from the camera to the point it orbits.
+        let cam = pov.worldPosition
+        let tgt = controller.target
+        let dx = cam.x - tgt.x, dy = cam.y - tgt.y, dz = cam.z - tgt.z
+        let distance = (dx * dx + dy * dy + dz * dz).squareRoot()
+        guard distance > 0 else { super.scrollWheel(with: event); return }
+
+        let baseline = baselineDistance ?? distance
+        baselineDistance = baseline
+
+        // Trackpad precise deltas are pixel-scale (large); mouse-wheel deltas are
+        // line-scale (small). Normalise so both gestures feel similar.
+        var delta = event.scrollingDeltaY
+        if event.hasPreciseScrollingDeltas { delta /= 10 }
+
+        // Proportional zoom: move a fraction of the current distance, so the feel is
+        // consistent regardless of model size. Wheel up (delta > 0) zooms in.
+        let fraction = max(-0.4, min(0.4, -delta * 0.03))
+        var newDistance = distance * (1 + fraction)
+        newDistance = max(baseline * 0.05, min(baseline * 12, newDistance))
+
+        // Camera space +Z points backward, so a positive step moves the camera away.
+        let step = newDistance - distance
+        controller.translateInCameraSpaceBy(x: 0, y: 0, z: Float(step))
     }
 }

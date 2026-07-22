@@ -11,7 +11,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     override func loadView() {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
-        sceneView = SCNView(frame: view.bounds)
+        sceneView = ZoomableSCNView(frame: view.bounds)
         sceneView.autoresizingMask = [.width, .height]
         sceneView.antialiasingMode = .multisampling4X
         sceneView.allowsCameraControl = true
@@ -95,5 +95,47 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private func formatDim(_ v: Float) -> String {
         if v >= 100 { return String(format: "%.0f", v) }
         return String(format: "%.1f", v)
+    }
+}
+
+/// An `SCNView` that adds scroll-wheel zoom on top of SceneKit's built-in camera control.
+/// The default controller handles orbit (drag) and trackpad pinch, but ignores the scroll
+/// wheel — this dollies the camera toward/away from its target so mouse users can zoom too.
+final class ZoomableSCNView: SCNView {
+
+    /// The initial framing distance, captured on first scroll, used to bound zoom range.
+    private var baselineDistance: CGFloat?
+
+    override func scrollWheel(with event: NSEvent) {
+        let controller = defaultCameraController
+        guard allowsCameraControl, let pov = controller.pointOfView else {
+            super.scrollWheel(with: event)
+            return
+        }
+
+        // Current distance from the camera to the point it orbits.
+        let cam = pov.worldPosition
+        let tgt = controller.target
+        let dx = cam.x - tgt.x, dy = cam.y - tgt.y, dz = cam.z - tgt.z
+        let distance = (dx * dx + dy * dy + dz * dz).squareRoot()
+        guard distance > 0 else { super.scrollWheel(with: event); return }
+
+        let baseline = baselineDistance ?? distance
+        baselineDistance = baseline
+
+        // Trackpad precise deltas are pixel-scale (large); mouse-wheel deltas are
+        // line-scale (small). Normalise so both gestures feel similar.
+        var delta = event.scrollingDeltaY
+        if event.hasPreciseScrollingDeltas { delta /= 10 }
+
+        // Proportional zoom: move a fraction of the current distance, so the feel is
+        // consistent regardless of model size. Wheel up (delta > 0) zooms in.
+        let fraction = max(-0.4, min(0.4, -delta * 0.03))
+        var newDistance = distance * (1 + fraction)
+        newDistance = max(baseline * 0.05, min(baseline * 12, newDistance))
+
+        // Camera space +Z points backward, so a positive step moves the camera away.
+        let step = newDistance - distance
+        controller.translateInCameraSpaceBy(x: 0, y: 0, z: Float(step))
     }
 }
