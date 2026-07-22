@@ -131,12 +131,13 @@ final class ThreeMFParser {
 
             allBuildItems.append(contentsOf: delegate.buildItems)
 
-            // Merge metadata (first non-nil value wins)
-            if metadata.title == nil { metadata.title = delegate.metadata["Title"] }
-            if metadata.designer == nil { metadata.designer = delegate.metadata["Designer"] }
-            if metadata.description == nil { metadata.description = delegate.metadata["Description"] }
-            if metadata.copyright == nil { metadata.copyright = delegate.metadata["Copyright"] }
-            if metadata.application == nil { metadata.application = delegate.metadata["Application"] }
+            // Merge metadata (first non-nil value wins). Slicer descriptions often arrive
+            // as (sometimes double-encoded) HTML, so clean every field to plain text.
+            if metadata.title == nil { metadata.title = Self.cleanMetadata(delegate.metadata["Title"]) }
+            if metadata.designer == nil { metadata.designer = Self.cleanMetadata(delegate.metadata["Designer"]) }
+            if metadata.description == nil { metadata.description = Self.cleanMetadata(delegate.metadata["Description"]) }
+            if metadata.copyright == nil { metadata.copyright = Self.cleanMetadata(delegate.metadata["Copyright"]) }
+            if metadata.application == nil { metadata.application = Self.cleanMetadata(delegate.metadata["Application"]) }
         }
 
         // Merge color data across objects: if any object has colors, backfill others with gray
@@ -413,6 +414,75 @@ final class ThreeMFParser {
     private static func store32(_ data: inout Data, _ offset: Int, _ value: UInt32) {
         guard offset >= 0, offset + 4 <= data.count else { return }
         withUnsafeBytes(of: value) { data.replaceSubrange(offset..<offset+4, with: $0) }
+    }
+
+    // MARK: - Metadata sanitisation
+
+    /// Cleans a raw metadata value to plain text, returning nil if nothing is left.
+    static func cleanMetadata(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let cleaned = sanitizeMetadataText(raw)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    /// Strips HTML tags and decodes entities (including double-encoded ones like
+    /// `&amp;#39;`) so slicer descriptions read as plain text.
+    static func sanitizeMetadataText(_ raw: String) -> String {
+        var text = raw
+
+        // Turn line/paragraph breaks into newlines before removing the rest of the markup.
+        for tag in ["<br>", "<br/>", "<br />", "</p>", "</P>", "</div>", "</li>"] {
+            text = text.replacingOccurrences(of: tag, with: "\n")
+        }
+        // Remove any remaining tags.
+        text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+
+        // Decode entities, repeating to unwind double-encoding (e.g. "&amp;#39;" -> "'").
+        for _ in 0..<3 {
+            let decoded = decodeHTMLEntities(text)
+            if decoded == text { break }
+            text = decoded
+        }
+
+        // Collapse whitespace: runs of spaces/tabs to one space, blank lines to one break.
+        text = text.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: " *\\n[ \\n]*", with: "\n", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Decodes the common named entities plus numeric (`&#39;`) and hex (`&#x27;`) forms.
+    private static func decodeHTMLEntities(_ s: String) -> String {
+        var result = s
+        let named: [(String, String)] = [
+            ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+            ("&quot;", "\""), ("&apos;", "'"), ("&nbsp;", " "),
+        ]
+        for (entity, replacement) in named {
+            result = result.replacingOccurrences(of: entity, with: replacement)
+        }
+        return decodeNumericEntities(result)
+    }
+
+    /// Replaces `&#nnn;` / `&#xhhh;` character references with their Unicode scalars.
+    private static func decodeNumericEntities(_ s: String) -> String {
+        guard s.contains("&#") else { return s }
+        guard let regex = try? NSRegularExpression(pattern: "&#(x?)([0-9A-Fa-f]+);") else { return s }
+        let ns = s as NSString
+        var result = ""
+        var last = 0
+        for match in regex.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
+            result += ns.substring(with: NSRange(location: last, length: match.range.location - last))
+            let isHex = ns.substring(with: match.range(at: 1)) == "x"
+            let digits = ns.substring(with: match.range(at: 2))
+            if let code = UInt32(digits, radix: isHex ? 16 : 10), let scalar = Unicode.Scalar(code) {
+                result += String(scalar)
+            } else {
+                result += ns.substring(with: match.range)   // leave invalid refs untouched
+            }
+            last = match.range.location + match.range.length
+        }
+        result += ns.substring(from: last)
+        return result
     }
 }
 

@@ -913,4 +913,34 @@ final class ThreeMFParserTests: XCTestCase {
         let result = try ThreeMFParser.extractEmbeddedThumbnail(fileAt: url)
         XCTAssertEqual(result, thumbBytes)
     }
+
+    // MARK: - Metadata Sanitisation Tests
+
+    func testSanitizeStripsTagsAndDecodesDoubleEncodedEntities() {
+        // Real-world slicer description: HTML with double-encoded entities.
+        let raw = "<p>I haven&amp;#39;t seen a clip I liked so I designed one.</p>"
+            + "<p>&amp;nbsp;</p><p>Printed in PETG. No supports required.</p>"
+        let cleaned = ThreeMFParser.sanitizeMetadataText(raw)
+        XCTAssertEqual(
+            cleaned,
+            "I haven't seen a clip I liked so I designed one.\nPrinted in PETG. No supports required."
+        )
+    }
+
+    func testSanitizeDecodesNamedNumericAndHexEntities() {
+        XCTAssertEqual(
+            ThreeMFParser.sanitizeMetadataText("Bob&#x27;s &lt;cool&gt; part&nbsp;v2 &amp; more"),
+            "Bob's <cool> part v2 & more"
+        )
+    }
+
+    func testSanitizeLeavesPlainTextUntouched() {
+        XCTAssertEqual(ThreeMFParser.sanitizeMetadataText("A simple part"), "A simple part")
+    }
+
+    func testCleanMetadataReturnsNilForEmptyOrMarkupOnlyValues() {
+        XCTAssertNil(ThreeMFParser.cleanMetadata(nil))
+        XCTAssertNil(ThreeMFParser.cleanMetadata("<p>&amp;nbsp;</p>"))
+        XCTAssertNil(ThreeMFParser.cleanMetadata("   "))
+    }
 }
