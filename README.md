@@ -77,6 +77,14 @@ none is present.
     └── SceneBuilder.swift   # Mesh → SCNScene with lighting and build-plate grid
 ```
 
+## Changelog
+
+Full history and downloads are on the [Releases page](https://github.com/cavoco/Preview3MF/releases). Recent highlights:
+
+- **v1.0.17** — scroll-wheel zoom in the 3D preview and host app; slicer metadata sanitized to plain text
+- **v1.0.16** — signed & notarized builds so Gatekeeper opens the app without warnings
+- **v1.0.14** — steadier auto-spin in the host app's drag-and-drop preview
+
 ## License
 
 MIT

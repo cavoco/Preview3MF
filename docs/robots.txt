@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://cavoco.github.io/Preview3MF/sitemap.xml
