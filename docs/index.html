@@ -30,6 +30,44 @@
     }
   }
   </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "How do I preview a .3mf file on Mac?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Install Preview3MF, then select any .3mf file in Finder and press Space. Quick Look opens a real 3D preview of the model that you can orbit and zoom — no slicer and no extra app to launch." }
+      },
+      {
+        "@type": "Question",
+        "name": "Why don't my .3mf files show thumbnails in Finder?",
+        "acceptedAnswer": { "@type": "Answer", "text": "By default macOS has no idea how to render .3mf files, so they fall back to a generic icon. Preview3MF adds a thumbnail extension that draws a proper 3MF thumbnail in Finder — reusing the slicer's embedded preview image when there is one, and rendering the mesh itself when there isn't. If icons don't refresh right away, run qlmanage -r in Terminal to reset the Quick Look cache." }
+      },
+      {
+        "@type": "Question",
+        "name": "Do I need Bambu Studio or PrusaSlicer to open a .3mf file?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. Preview3MF reads .3mf files directly, so you can open and inspect a model without launching Bambu Studio, PrusaSlicer, or Orca. It handles files exported by all of them, including multi-object plates and component assemblies." }
+      },
+      {
+        "@type": "Question",
+        "name": "What is a .3mf file?",
+        "acceptedAnswer": { "@type": "Answer", "text": "3MF (3D Manufacturing Format) is a modern file format for 3D printing — a ZIP archive of XML that stores the mesh along with colors, materials, and print metadata. It's the default project format for slicers like Bambu Studio and PrusaSlicer, and unlike .stl it can carry multiple objects, colors, and units in a single file." }
+      },
+      {
+        "@type": "Question",
+        "name": "Is Preview3MF free?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes — it's completely free and open source under the MIT License. The builds on the releases page are signed and notarized by Apple, so Gatekeeper opens them without warnings." }
+      },
+      {
+        "@type": "Question",
+        "name": "Which Macs and macOS versions are supported?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Preview3MF runs on macOS 13 (Ventura) and later and ships as a universal binary, so it runs natively on both Apple Silicon and Intel Macs." }
+      }
+    ]
+  }
+  </script>
   <style>
     :root {
       --bg: #ffffff;
@@ -134,6 +172,24 @@
     .how p { margin: 0 0 16px; }
     .how strong { color: var(--fg); }
 
+    /* FAQ */
+    .faq { max-width: 720px; margin: 0 auto; }
+    .faq details {
+      border: 1px solid var(--border); border-radius: 14px; background: var(--card);
+      padding: 0 22px; margin-bottom: 12px;
+    }
+    .faq summary {
+      cursor: pointer; list-style: none; padding: 20px 0; font-size: 17px; font-weight: 600;
+      display: flex; justify-content: space-between; align-items: center; gap: 16px;
+    }
+    .faq summary::-webkit-details-marker { display: none; }
+    .faq summary::after { content: "+"; color: var(--fg-soft); font-weight: 400; font-size: 22px; }
+    .faq details[open] summary::after { content: "–"; }
+    .faq details[open] summary { border-bottom: 1px solid var(--border); }
+    .faq .answer { padding: 16px 0 22px; color: var(--fg-soft); font-size: 15.5px; }
+    .faq .answer p { margin: 0 0 12px; }
+    .faq .answer p:last-child { margin: 0; }
+
     footer { text-align: center; padding: 48px 0 60px; color: var(--fg-soft); font-size: 14px; border-top: 1px solid var(--border); }
     footer a { color: var(--fg-soft); text-decoration: underline; }
   </style>
@@ -199,6 +255,52 @@
         <p><strong>Resolve assemblies.</strong> Component references are expanded so assembly objects become their part meshes with composed transforms.</p>
         <p><strong>Render.</strong> It builds SceneKit geometry with per-face normals for flat shading, a build-plate grid, three-point lighting, and an auto-framed camera.</p>
         <p><strong>Thumbnails.</strong> Slicers usually bake a rendered PNG into the package — the thumbnail extension reuses that as a fast path and only falls back to SceneKit when none is present.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Frequently asked questions</h2>
+      <p class="section-sub">Everything about previewing and opening <code>.3mf</code> files on a Mac.</p>
+      <div class="faq">
+        <details>
+          <summary>How do I preview a .3mf file on Mac?</summary>
+          <div class="answer">
+            <p>Install Preview3MF, then select any <code>.3mf</code> file in Finder and press <strong>Space</strong>. Quick Look opens a real 3D preview of the model that you can orbit and zoom — no slicer and no extra app to launch.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Why don't my .3mf files show thumbnails in Finder?</summary>
+          <div class="answer">
+            <p>By default macOS has no idea how to render <code>.3mf</code> files, so they fall back to a generic icon. Preview3MF adds a thumbnail extension that draws a proper <strong>3MF thumbnail</strong> in Finder — reusing the slicer's embedded preview image when there is one, and rendering the mesh itself when there isn't.</p>
+            <p>If icons don't refresh right away, run <code>qlmanage -r</code> in Terminal to reset the Quick Look cache.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Do I need Bambu Studio or PrusaSlicer to open a .3mf file?</summary>
+          <div class="answer">
+            <p>No. Preview3MF reads <code>.3mf</code> files directly, so you can open and inspect a model without launching Bambu Studio, PrusaSlicer, or Orca. It handles files exported by all of them, including multi-object plates and component assemblies.</p>
+          </div>
+        </details>
+        <details>
+          <summary>What is a .3mf file?</summary>
+          <div class="answer">
+            <p>3MF (3D Manufacturing Format) is a modern file format for 3D printing — a ZIP archive of XML that stores the mesh along with colors, materials, and print metadata. It's the default project format for slicers like Bambu Studio and PrusaSlicer, and unlike <code>.stl</code> it can carry multiple objects, colors, and units in a single file.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Is Preview3MF free?</summary>
+          <div class="answer">
+            <p>Yes — it's completely free and open source under the MIT License. The builds on the releases page are signed and notarized by Apple, so Gatekeeper opens them without warnings.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Which Macs and macOS versions are supported?</summary>
+          <div class="answer">
+            <p>Preview3MF runs on <strong>macOS 13 (Ventura) and later</strong> and ships as a universal binary, so it runs natively on both Apple Silicon and Intel Macs.</p>
+          </div>
+        </details>
       </div>
     </div>
   </section>
