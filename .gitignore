@@ -5,7 +5,9 @@ DerivedData/
 xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
-*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+# Package.resolved is deliberately tracked: it pins the exact Sparkle and
+# ZIPFoundation builds that ship, so a release can't pick up a new upstream
+# version without a commit saying so.
 
 ## macOS
 .DS_Store
