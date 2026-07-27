@@ -90,6 +90,12 @@ jobs:
             fi
           done < <(find "$APP_PATH" -type f -perm +111 -path "*/MacOS/*")
 
+      - name: Sign Sparkle helpers
+        run: |
+          # Xcode leaves Sparkle's nested helpers ad-hoc signed when the framework
+          # comes from SPM, which notarization rejects. Re-sign them inside-out.
+          ./scripts/sign_sparkle.sh "$APP_PATH" "$SIGN_IDENTITY" Preview3MF/Preview3MF.entitlements
+
       - name: Notarize
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
