@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>Preview3MF</title>
+        <link>https://cavoco.github.io/Preview3MF/appcast.xml</link>
+        <description>Updates for Preview3MF, a Quick Look extension for .3mf files.</description>
+        <language>en</language>
+        <item>
+            <title>1.0.17</title>
+            <pubDate>Thu, 23 Jul 2026 10:20:18 +0000</pubDate>
+            <sparkle:version>18</sparkle:version>
+            <sparkle:shortVersionString>1.0.17</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul><li>Scroll-wheel zoom in the 3D preview and host app</li><li>Slicer metadata is now shown as plain text</li></ul>]]></description>
+            <enclosure url="https://github.com/cavoco/Preview3MF/releases/download/v1.0.17/Preview3MF-v1.0.17-universal.zip" sparkle:edSignature="2WzdwkT5P18/ihJrlu9zMivPWxX7EWh/oyzomuLzg+LanuvuSnI2deObJoYLb6AVYdxq+b+EY9Fa3bdvyBhhBg==" length="3305654" type="application/octet-stream"/>
+        </item>
+    </channel>
+</rss>

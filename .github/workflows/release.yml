@@ -10,12 +10,15 @@ permissions:
 
 env:
   TEAM_ID: XPBX8CKBGU
+  SPARKLE_VERSION: 2.9.4
 
 jobs:
   build-and-release:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # release notes are built from the commits since the previous tag
 
       - name: Extract version from tag
         run: |
@@ -146,3 +149,65 @@ jobs:
             --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: Publish Sparkle appcast entry
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::SPARKLE_PRIVATE_KEY secret is not set; existing installs cannot be offered this update"
+            exit 1
+          fi
+
+          # Sparkle's signing tools ship only in the release tarball, not the SPM package.
+          curl -fsSL -o "$RUNNER_TEMP/Sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xf "$RUNNER_TEMP/Sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+
+          ZIP="Preview3MF-${TAG}-universal.zip"
+
+          # Sign the exact bytes that were attached to the release. Piping the key via
+          # stdin keeps it out of the process list.
+          SIGNATURE=$(echo "$SPARKLE_PRIVATE_KEY" \
+            | "$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - -p "$ZIP")
+          LENGTH=$(stat -f%z "$ZIP")
+          echo "Signed $ZIP ($LENGTH bytes)"
+
+          # Sparkle orders releases by build number, not the marketing version.
+          BUILD=$(grep -m1 'CURRENT_PROJECT_VERSION' Preview3MF.xcodeproj/project.pbxproj \
+            | sed 's/.*= *//;s/ *;.*//')
+
+          # Release notes = commit subjects since the previous tag, minus the version bump.
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$PREVIOUS_TAG" ]; then
+            NOTES=$(git log --pretty=format:%s "${PREVIOUS_TAG}..${TAG}" | grep -v '^Bump version' || true)
+          else
+            NOTES=""
+          fi
+
+          # The appcast lives on main (GitHub Pages serves docs/), but this run is on a
+          # detached tag, so move to main before editing. The zip is untracked and survives.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+
+          python3 scripts/update_appcast.py \
+            --appcast docs/appcast.xml \
+            --version "${TAG#v}" \
+            --build "$BUILD" \
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ZIP}" \
+            --signature "$SIGNATURE" \
+            --length "$LENGTH" \
+            --notes "$NOTES"
+
+          if git diff --quiet -- docs/appcast.xml; then
+            echo "Appcast already up to date for $TAG"
+          else
+            git add docs/appcast.xml
+            git commit -m "Publish appcast entry for $TAG"
+            git push origin main
+            echo "Appcast published for $TAG"
+          fi

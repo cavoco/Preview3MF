@@ -18,6 +18,7 @@
 		A100000009 /* PreviewExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A300000002 /* PreviewExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A100000010 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A500000001 /* ZIPFoundation */; };
 		A100000011 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A500000002 /* ZIPFoundation */; };
+		A100000012 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A500000006 /* Sparkle */; };
 		A100000020 /* ThreeMFParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000030 /* ThreeMFParserTests.swift */; };
 		A100000021 /* SceneBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000031 /* SceneBuilderTests.swift */; };
 		A100000030 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000040 /* ThumbnailProvider.swift */; };
@@ -94,6 +95,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A100000010 /* ZIPFoundation in Frameworks */,
+				A100000012 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -236,6 +238,7 @@
 			name = Preview3MF;
 			packageProductDependencies = (
 				A500000001 /* ZIPFoundation */,
+				A500000006 /* Sparkle */,
 			);
 			productName = Preview3MF;
 			productReference = A300000001 /* Preview3MF.app */;
@@ -313,6 +316,7 @@
 			mainGroup = A900000001;
 			packageReferences = (
 				A500000003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				A500000005 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			productRefGroup = A900000005 /* Products */;
 			projectDirPath = "";
@@ -862,6 +866,14 @@
 				minimumVersion = 0.9.19;
 			};
 		};
+		A500000005 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.4;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -879,6 +891,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A500000003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		A500000006 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A500000005 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
