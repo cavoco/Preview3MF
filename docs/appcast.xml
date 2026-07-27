@@ -7,11 +7,11 @@
         <language>en</language>
         <item>
             <title>1.0.18</title>
-            <pubDate>Mon, 27 Jul 2026 10:33:24 +0000</pubDate>
+            <pubDate>Mon, 27 Jul 2026 10:50:07 +0000</pubDate>
             <sparkle:version>19</sparkle:version>
             <sparkle:shortVersionString>1.0.18</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[<ul><li>Document automatic updates in the README and landing page</li><li>Sign Sparkle&#x27;s nested helpers with the Developer ID</li><li>Add Sparkle auto-update</li><li>Add Cloudflare Web Analytics beacon</li><li>Use transparent window capture; let native shadow show on hero</li><li>Update preview screenshot to clean window-only capture</li><li>Add Google Search Console verification tag</li><li>Add FAQ section with FAQPage structured data</li><li>SEO: canonical, JSON-LD, robots/sitemap, search phrases, changelog</li></ul>]]></description>
+            <description><![CDATA[<ul><li>Add Sparkle auto-update</li></ul>]]></description>
             <enclosure url="https://github.com/cavoco/Preview3MF/releases/download/v1.0.18/Preview3MF-v1.0.18-universal.zip" sparkle:edSignature="d71eHojTXZKUJOLLP20DT8tftJarX2//1kJwodyaBE27yVTCmG4ZN/OmqaCKEgsnPFURN1kC6ioAhQfGxSyXAA==" length="4330868" type="application/octet-stream"/>
         </item>
         <item>

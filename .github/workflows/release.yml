@@ -185,13 +185,14 @@ jobs:
           BUILD=$(grep -m1 'CURRENT_PROJECT_VERSION' Preview3MF.xcodeproj/project.pbxproj \
             | sed 's/.*= *//;s/ *;.*//')
 
-          # Release notes = commit subjects since the previous tag, minus the version bump.
+          # Release notes for the update dialog: user-facing commits since the previous tag.
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
           if [ -n "$PREVIOUS_TAG" ]; then
-            NOTES=$(git log --pretty=format:%s "${PREVIOUS_TAG}..${TAG}" | grep -v '^Bump version' || true)
+            NOTES=$(./scripts/release_notes.sh "$PREVIOUS_TAG" "$TAG")
           else
             NOTES=""
           fi
+          echo "Release notes:"; echo "${NOTES:-(none — falling back to generic text)}"
 
           # The appcast lives on main (GitHub Pages serves docs/), but this run is on a
           # detached tag, so move to main before editing. The zip is untracked and survives.
