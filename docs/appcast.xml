@@ -6,6 +6,15 @@
         <description>Updates for Preview3MF, a Quick Look extension for .3mf files.</description>
         <language>en</language>
         <item>
+            <title>1.0.20</title>
+            <pubDate>Mon, 27 Jul 2026 11:38:52 +0000</pubDate>
+            <sparkle:version>21</sparkle:version>
+            <sparkle:shortVersionString>1.0.20</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul><li>Add an update preference and pin dependency versions</li></ul>]]></description>
+            <enclosure url="https://github.com/cavoco/Preview3MF/releases/download/v1.0.20/Preview3MF-v1.0.20-universal.zip" sparkle:edSignature="wKhQJg3WQslDdJ6Ay7WJaABVk+hNF09NmyR34GPJbTxJz44FlKwm3F8C3mMmcR4vDIPKSpa7xjKFaLgefeNpDw==" length="4341229" type="application/octet-stream"/>
+        </item>
+        <item>
             <title>1.0.19</title>
             <pubDate>Mon, 27 Jul 2026 10:58:03 +0000</pubDate>
             <sparkle:version>20</sparkle:version>
