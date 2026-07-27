@@ -58,6 +58,23 @@ xcodebuild -scheme Preview3MF -configuration Release build
 
 Or open `Preview3MF.xcodeproj` in Xcode and hit Cmd+R.
 
+### Testing updates from a local build
+
+Local builds can't check for updates out of the box. Sparkle ships its helpers
+(`Updater.app`, `Autoupdate`, the XPC services) ad-hoc signed, and Sparkle refuses
+to use helpers whose team identifier doesn't match the host app — it reports
+"An error occurred in retrieving update information". Release builds are fixed up
+by the release workflow; local builds need it done by hand:
+
+```bash
+./scripts/sign_sparkle.sh /path/to/Preview3MF.app \
+  "$(security find-identity -v -p codesigning | grep 'Apple Development' | head -1 | awk -F'"' '{print $2}')"
+```
+
+This isn't an Xcode build phase because the project enables
+`ENABLE_USER_SCRIPT_SANDBOXING`, under which `codesign` can't modify the app
+bundle — and the phase fails silently rather than erroring.
+
 ## How It Works
 
 `.3mf` files are ZIP archives containing XML model data. The extension:
