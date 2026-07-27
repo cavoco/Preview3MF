@@ -22,6 +22,7 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 - **Finder thumbnails** — rendered icons for `.3mf` files, reusing the slicer's embedded preview when available
 - **Multi-object support** — handles files with multiple mesh objects (Bambu Studio, PrusaSlicer, etc.)
 - **Drag-and-drop** — drop `.3mf` files into the host app for inline preview
+- **Automatic updates** — signed updates delivered through Sparkle
 
 ## Installation
 
@@ -34,6 +35,16 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 5. That's it — press Space on any `.3mf` file in Finder, or just look at the icons
 
 > **Tip:** If Quick Look doesn't pick it up immediately, run `qlmanage -r` in Terminal to reset the Quick Look cache.
+
+## Updates
+
+From v1.0.18 onward the app updates itself. It checks daily and you can ask any
+time with **Preview3MF → Check for Updates…**. Updates are downloaded from the
+GitHub release and verified against an EdDSA signature before installing, so a
+tampered download is rejected.
+
+Running v1.0.17 or earlier? Those builds predate Sparkle, so download v1.0.18
+manually once — after that it's automatic.
 
 ## Building from Source
 
