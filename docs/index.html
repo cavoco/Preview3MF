@@ -4,12 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="google-site-verification" content="m9sMwKGgnUYRvpNPA6xim8i6-lfr7zzsQnmdZpkmvWY">
-  <title>Preview3MF — Quick Look for .3mf files on macOS</title>
-  <meta name="description" content="A macOS Quick Look extension for .3mf files. Press Space in Finder to see a 3D preview of any model — no slicer needed.">
-  <meta property="og:title" content="Preview3MF">
+  <title>Preview3MF — 3MF Quick Look &amp; Finder Thumbnails on macOS</title>
+  <meta name="description" content="A free 3MF QuickLook plugin for Mac. Press Space in Finder to see a 3D preview of any .3mf file, plus real 3MF thumbnails on every icon — no slicer needed.">
+  <meta property="og:title" content="Preview3MF — 3MF Quick Look &amp; Finder Thumbnails on macOS">
   <meta property="og:description" content="Press Space on any .3mf file in Finder to see a 3D preview — no slicer needed.">
-  <meta property="og:image" content="preview.png">
+  <meta property="og:image" content="https://cavoco.github.io/Preview3MF/preview.png">
+  <meta property="og:image:alt" content="Preview3MF showing a 3D model on a build-plate grid in Quick Look">
+  <meta property="og:url" content="https://cavoco.github.io/Preview3MF/">
+  <meta property="og:site_name" content="Preview3MF">
   <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Preview3MF — 3MF Quick Look &amp; Finder Thumbnails on macOS">
+  <meta name="twitter:description" content="Press Space on any .3mf file in Finder to see a 3D preview — no slicer needed.">
+  <meta name="twitter:image" content="https://cavoco.github.io/Preview3MF/preview.png">
   <link rel="canonical" href="https://cavoco.github.io/Preview3MF/">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>">
   <script type="application/ld+json">
@@ -17,9 +24,12 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Preview3MF",
-    "description": "A macOS Quick Look extension for .3mf files. Press Space in Finder to see a 3D preview of any model — no slicer needed.",
+    "alternateName": "3MF QuickLook plugin for Mac",
+    "description": "A macOS Quick Look extension for .3mf files. Press Space in Finder to see a 3D preview of any model, plus real 3MF thumbnails on every Finder icon — no slicer needed.",
     "applicationCategory": "UtilitiesApplication",
-    "operatingSystem": "macOS 13+",
+    "operatingSystem": "macOS 13 Ventura, macOS 14 Sonoma, macOS 15 Sequoia, macOS 26 Tahoe",
+    "screenshot": "https://cavoco.github.io/Preview3MF/preview.png",
+    "image": "https://cavoco.github.io/Preview3MF/preview.png",
     "url": "https://cavoco.github.io/Preview3MF/",
     "downloadUrl": "https://github.com/cavoco/Preview3MF/releases/latest",
     "license": "https://github.com/cavoco/Preview3MF/blob/main/LICENSE",
@@ -63,8 +73,8 @@
       },
       {
         "@type": "Question",
-        "name": "Which Macs and macOS versions are supported?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Preview3MF runs on macOS 13 (Ventura) and later and ships as a universal binary, so it runs natively on both Apple Silicon and Intel Macs." }
+        "name": "Which Macs and macOS versions are supported? Does it work on macOS Tahoe?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Preview3MF runs on macOS 13 (Ventura) and later — including Sonoma, Sequoia, and macOS 26 Tahoe, which it is actively developed on. It ships as a universal binary, so it runs natively on both Apple Silicon and Intel Macs." }
       }
     ]
   }
@@ -201,7 +211,7 @@
   <header>
     <div class="wrap">
       <div class="badge">macOS Quick Look extension</div>
-      <h1>Preview <code style="font-size:.8em">.3mf</code> files instantly</h1>
+      <h1>Preview <code style="font-size:.8em">.3mf</code> files instantly on Mac</h1>
       <p class="tagline">A <strong>3MF viewer for Mac</strong> built into Quick Look. Press <strong>Space</strong> to open a <code>.3mf</code> file on Mac and see a 3D preview of the model — no slicer needed.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/cavoco/Preview3MF/releases/latest">↓ Download for macOS</a>
@@ -255,6 +265,7 @@
       <h2>How it works</h2>
       <p class="section-sub">A <code>.3mf</code> file is a ZIP archive of XML model data.</p>
       <div class="how">
+        <p><strong>A modern QuickLook plugin.</strong> Preview3MF ships as a Quick Look <em>app extension</em> — the kind macOS 13 and later use — rather than a legacy <code>.qlgenerator</code> bundle. That's why you install it by launching the app once instead of dropping a file into a <code>Library/QuickLook</code> folder.</p>
         <p><strong>Extract &amp; parse.</strong> Preview3MF pulls the <code>.model</code> files from the archive and reads the vertices, triangles, build items, materials, and metadata.</p>
         <p><strong>Resolve assemblies.</strong> Component references are expanded so assembly objects become their part meshes with composed transforms.</p>
         <p><strong>Render.</strong> It builds SceneKit geometry with per-face normals for flat shading, a build-plate grid, three-point lighting, and an auto-framed camera.</p>
@@ -300,9 +311,9 @@
           </div>
         </details>
         <details>
-          <summary>Which Macs and macOS versions are supported?</summary>
+          <summary>Which Macs and macOS versions are supported? Does it work on macOS Tahoe?</summary>
           <div class="answer">
-            <p>Preview3MF runs on <strong>macOS 13 (Ventura) and later</strong> and ships as a universal binary, so it runs natively on both Apple Silicon and Intel Macs.</p>
+            <p>Preview3MF runs on <strong>macOS 13 (Ventura) and later</strong> — including Sonoma, Sequoia, and <strong>macOS 26 Tahoe</strong>, which it is actively developed on. It ships as a universal binary, so it runs natively on both Apple Silicon and Intel Macs.</p>
           </div>
         </details>
       </div>
