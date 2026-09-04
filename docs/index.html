@@ -19,6 +19,7 @@
   <meta name="twitter:image" content="https://cavoco.github.io/Preview3MF/preview.png">
   <link rel="canonical" href="https://cavoco.github.io/Preview3MF/">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>">
+  <link rel="preload" as="image" href="preview.webp" type="image/webp" fetchpriority="high">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -141,6 +142,7 @@
 
     /* Screenshot */
     .shot { margin: 48px auto 0; max-width: 780px; }
+    .shot picture { display: block; }
     .shot img {
       width: 100%; height: auto; display: block;
     }
@@ -219,7 +221,11 @@
       </div>
       <p class="req">Free &amp; open source · Universal (Apple Silicon + Intel) · Signed &amp; notarized · macOS 13+</p>
       <div class="shot">
-        <img src="preview.png" alt="Preview3MF showing a 3D model on a build-plate grid in Quick Look">
+        <picture>
+          <source srcset="preview.webp" type="image/webp">
+          <img src="preview.png" width="1844" height="1510" fetchpriority="high" decoding="async"
+               alt="Preview3MF showing a 3D model on a build-plate grid in Quick Look">
+        </picture>
       </div>
     </div>
   </header>
