@@ -710,6 +710,48 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(c0.z, 0.75, accuracy: 1e-3)
     }
 
+    // MARK: - Real File Fixture
+
+    func testParsesRealColourCubeFile() throws {
+        // A genuine .3mf on disk — real ZIP container, [Content_Types].xml, OPC
+        // relationships — rather than an XML string assembled in the test. Guards the
+        // whole path from archive to per-triangle colour. Located via #filePath so the
+        // fixture needs no bundle-resource wiring in the project file.
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/colour-cube.3mf")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: fixture.path),
+                          "fixture missing at \(fixture.path)")
+
+        let result = try ThreeMFParser.parse(fileAt: fixture)
+        XCTAssertEqual(result.metadata.title, "Colour Cube")
+        XCTAssertEqual(result.totalTriangles, 12)
+        XCTAssertTrue(result.hasColors)
+
+        let dims = try XCTUnwrap(result.dimensions)
+        XCTAssertEqual(dims.x, 20, accuracy: 1e-3)
+        XCTAssertEqual(dims.y, 20, accuracy: 1e-3)
+        XCTAssertEqual(dims.z, 20, accuracy: 1e-3)
+
+        // Six faces, two triangles each, one colour per face in fixture order.
+        let expected: [SIMD4<Float>] = [
+            SIMD4(1, 0, 0, 1), SIMD4(0, 1, 0, 1), SIMD4(0, 0, 1, 1),
+            SIMD4(1, 1, 0, 1), SIMD4(1, 0, 1, 1), SIMD4(0, 1, 1, 1),
+        ]
+        let colors = try XCTUnwrap(result.items[0].mesh.triangleColors)
+        XCTAssertEqual(colors.count, 12)
+        for (index, tri) in colors.enumerated() {
+            let want = expected[index / 2]
+            XCTAssertEqual(tri.0, want, "triangle \(index) vertex 0")
+            XCTAssertEqual(tri.1, want, "triangle \(index) vertex 1")
+            XCTAssertEqual(tri.2, want, "triangle \(index) vertex 2")
+        }
+
+        // All six face colours must be distinct — a regression that collapsed everything
+        // to one colour would still satisfy a laxer check.
+        XCTAssertEqual(Set(colors.map { "\($0.0)" }).count, 6)
+    }
+
     // MARK: - Build Item Transform Tests
 
     func testBuildItemWithTransform() throws {
