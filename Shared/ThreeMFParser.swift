@@ -786,7 +786,7 @@ final class FastModelParser {
             let n = bytes.count
 
             let lt = UInt8(ascii: "<"), gt = UInt8(ascii: ">"), slash = UInt8(ascii: "/")
-            let quote = UInt8(ascii: "\""), eq = UInt8(ascii: "=")
+            let quote = UInt8(ascii: "\""), eq = UInt8(ascii: "="), colon = UInt8(ascii: ":")
             @inline(__always) func isSpace(_ b: UInt8) -> Bool {
                 b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D
             }
@@ -838,13 +838,19 @@ final class FastModelParser {
                     var k = after; while k < n, bytes[k] != gt { k += 1 }; i = k + 1; continue
                 }
                 let isClose = c0 == slash
-                let ns = isClose ? after + 1 : after
+                var ns = isClose ? after + 1 : after
                 var j = ns
                 while j < n {
                     let b = bytes[j]
                     if b == gt || b == slash || isSpace(b) { break }
                     j += 1
                 }
+                // Match on the local name. The Materials & Properties extension is written
+                // with a namespace prefix (<m:colorgroup>) whose spelling is up to the writer,
+                // so skip past any prefix before comparing.
+                var localStart = ns
+                while localStart < j, bytes[localStart] != colon { localStart += 1 }
+                if localStart < j { ns = localStart + 1 }
                 let nl = j - ns
                 var k = j
                 while k < n, bytes[k] != gt { k += 1 }   // k at '>'
@@ -861,7 +867,7 @@ final class FastModelParser {
                         currentObjectID = nil; currentVertices = []; currentTriangles = []
                         currentTriangleColors = nil; currentComponents = []
                         objectPID = nil; objectPIndex = nil
-                    } else if nameIs(ns, nl, "basematerials") {
+                    } else if nameIs(ns, nl, "basematerials") || nameIs(ns, nl, "colorgroup") {
                         if let id = currentGroupID { materialGroups[id] = currentGroupColors }
                         currentGroupID = nil; currentGroupColors = []
                     } else if nameIs(ns, nl, "metadata") {
@@ -959,6 +965,23 @@ final class FastModelParser {
                 } else if nameIs(ns, nl, "basematerials") {
                     forEachAttr(j, attrEnd) { an, al, vs in
                         if nameIs(an, al, "id") { currentGroupID = d(vs); currentGroupColors = [] }
+                    }
+                } else if nameIs(ns, nl, "colorgroup") {
+                    // Materials & Properties extension — the standard way to carry
+                    // per-triangle colour, used by 3D Builder, Fusion and anything exporting
+                    // conformant 3MF. (Bambu Studio and OrcaSlicer instead paint via a
+                    // proprietary `paint_color` triangle attribute, which this does not read.)
+                    // Resource ids share a single space with <basematerials>, so triangles
+                    // resolve to these through the same pid / p1..p3 lookup, no special casing.
+                    forEachAttr(j, attrEnd) { an, al, vs in
+                        if nameIs(an, al, "id") { currentGroupID = d(vs); currentGroupColors = [] }
+                    }
+                } else if nameIs(ns, nl, "color"), currentGroupID != nil {
+                    forEachAttr(j, attrEnd) { an, al, vs in
+                        if nameIs(an, al, "color"),
+                           let color = ModelXMLDelegate.parseDisplayColor(str(vs, valueEnd(vs))) {
+                            currentGroupColors.append(color)
+                        }
                     }
                 } else if nameIs(ns, nl, "metadata") {
                     var name: String?

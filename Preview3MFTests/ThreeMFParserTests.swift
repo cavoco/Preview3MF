@@ -162,6 +162,59 @@ final class ThreeMFParserTests: XCTestCase {
         return Data(xml.utf8)
     }
 
+    /// Builds a model that colours triangles through the Materials & Properties extension
+    /// (`<m:colorgroup>`) rather than `<basematerials>` — the standard mechanism for
+    /// per-triangle colour in conformant 3MF. `prefix` covers both the usual
+    /// namespace-prefixed form and the rarer default-namespaced one.
+    private func makeColorGroupModelXML(
+        colors: [String],
+        vertices: [SIMD3<Float>],
+        triangles: [(v1: Int, v2: Int, v3: Int, pid: Int?, p1: Int?, p2: Int?, p3: Int?)],
+        objectPID: Int? = nil,
+        objectPIndex: Int? = nil,
+        prefix: String = "m:",
+        groupID: Int = 1,
+        extraResources: String = ""
+    ) -> Data {
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        xml += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\""
+        xml += " xmlns:m=\"http://schemas.microsoft.com/3dmanufacturing/material/2015/02\">"
+        xml += "<resources>"
+        xml += extraResources
+        xml += "<\(prefix)colorgroup id=\"\(groupID)\">"
+        for color in colors {
+            xml += "<\(prefix)color color=\"\(color)\"/>"
+        }
+        xml += "</\(prefix)colorgroup>"
+
+        var objAttrs = "id=\"99\" type=\"model\""
+        if let pid = objectPID { objAttrs += " pid=\"\(pid)\"" }
+        if let pindex = objectPIndex { objAttrs += " pindex=\"\(pindex)\"" }
+        xml += "<object \(objAttrs)><mesh><vertices>"
+        for v in vertices {
+            xml += "<vertex x=\"\(v.x)\" y=\"\(v.y)\" z=\"\(v.z)\"/>"
+        }
+        xml += "</vertices><triangles>"
+        for t in triangles {
+            var triAttrs = "v1=\"\(t.v1)\" v2=\"\(t.v2)\" v3=\"\(t.v3)\""
+            if let pid = t.pid { triAttrs += " pid=\"\(pid)\"" }
+            if let p1 = t.p1 { triAttrs += " p1=\"\(p1)\"" }
+            if let p2 = t.p2 { triAttrs += " p2=\"\(p2)\"" }
+            if let p3 = t.p3 { triAttrs += " p3=\"\(p3)\"" }
+            xml += "<triangle \(triAttrs)/>"
+        }
+        xml += "</triangles></mesh></object></resources>"
+        xml += "<build><item objectid=\"99\"/></build></model>"
+        return Data(xml.utf8)
+    }
+
+    private func parseColors(_ xml: Data) throws -> [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]? {
+        let zip = MiniZIP.createArchive(entries: [.init(path: "3D/3dmodel.model", data: xml)])
+        let url = try writeTempFile(zip)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try ThreeMFParser.parse(fileAt: url).items[0].mesh.triangleColors
+    }
+
     private func makeMultiObjectModelXML(
         objects: [(vertices: [SIMD3<Float>], triangles: [(Int, Int, Int)])],
         transforms: [String?]? = nil
@@ -549,6 +602,112 @@ final class ThreeMFParserTests: XCTestCase {
         let result = try ThreeMFParser.parse(fileAt: url)
         let items = result.items
         XCTAssertNil(items[0].mesh.triangleColors)
+    }
+
+    // MARK: - Color Group Tests (Materials & Properties extension)
+
+    func testParseColorGroup() throws {
+        // Painted multi-colour models use <m:colorgroup>, not <basematerials>.
+        let colors = try parseColors(makeColorGroupModelXML(
+            colors: ["#FF0000", "#00FF00"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: 1, p1: 0, p2: 0, p3: 0)]
+        ))
+        XCTAssertNotNil(colors)
+        XCTAssertEqual(colors?.count, 1)
+        let (c0, c1, c2) = colors![0]
+        XCTAssertEqual(c0.x, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.y, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.z, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c1, c0)
+        XCTAssertEqual(c2, c0)
+    }
+
+    func testParseColorGroupWithoutNamespacePrefix() throws {
+        // Same document, default-namespaced rather than prefixed.
+        let colors = try parseColors(makeColorGroupModelXML(
+            colors: ["#FF0000", "#00FF00"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: 1, p1: 1, p2: 1, p3: 1)],
+            prefix: ""
+        ))
+        let (c0, _, _) = try XCTUnwrap(colors?.first)
+        XCTAssertEqual(c0.x, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.y, 1.0, accuracy: 1e-3)
+    }
+
+    func testParseColorGroupPerVertexColors() throws {
+        // Per-vertex indices are how a paint brush stroke is represented across a triangle.
+        let colors = try parseColors(makeColorGroupModelXML(
+            colors: ["#FF0000", "#00FF00", "#0000FF"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: 1, p1: 0, p2: 1, p3: 2)]
+        ))
+        let (c0, c1, c2) = try XCTUnwrap(colors?.first)
+        XCTAssertEqual(c0.x, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c1.y, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c2.z, 1.0, accuracy: 1e-3)
+    }
+
+    func testParseColorGroupObjectLevelDefault() throws {
+        // Object-level pid/pindex with no per-triangle override.
+        let colors = try parseColors(makeColorGroupModelXML(
+            colors: ["#FF0000", "#00FF00"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: nil, p1: nil, p2: nil, p3: nil)],
+            objectPID: 1,
+            objectPIndex: 1
+        ))
+        let (c0, _, _) = try XCTUnwrap(colors?.first)
+        XCTAssertEqual(c0.x, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.y, 1.0, accuracy: 1e-3)
+    }
+
+    func testParseColorGroupAlpha() throws {
+        // #RRGGBBAA — colorgroup entries carry alpha, unlike most displaycolor values.
+        let colors = try parseColors(makeColorGroupModelXML(
+            colors: ["#FF000080"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: 1, p1: 0, p2: 0, p3: 0)]
+        ))
+        let (c0, _, _) = try XCTUnwrap(colors?.first)
+        XCTAssertEqual(c0.x, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(c0.w, 128.0 / 255.0, accuracy: 1e-3)
+    }
+
+    func testColorGroupCoexistsWithBaseMaterials() throws {
+        // Both resource kinds share one id space; a triangle's pid picks between them.
+        let baseMaterials = "<basematerials id=\"1\"><base displaycolor=\"#FF0000\"/></basematerials>"
+        let colors = try parseColors(makeColorGroupModelXML(
+            colors: ["#0000FF"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(1, 1, 0)],
+            triangles: [
+                (v1: 0, v2: 1, v3: 2, pid: 1, p1: 0, p2: 0, p3: 0),   // basematerials → red
+                (v1: 1, v2: 3, v3: 2, pid: 2, p1: 0, p2: 0, p3: 0),   // colorgroup    → blue
+            ],
+            groupID: 2,
+            extraResources: baseMaterials
+        ))
+        XCTAssertEqual(colors?.count, 2)
+        let (red, _, _) = try XCTUnwrap(colors?[0])
+        let (blue, _, _) = try XCTUnwrap(colors?[1])
+        XCTAssertEqual(red.x, 1.0, accuracy: 1e-3)
+        XCTAssertEqual(red.z, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(blue.x, 0.0, accuracy: 1e-3)
+        XCTAssertEqual(blue.z, 1.0, accuracy: 1e-3)
+    }
+
+    func testColorGroupUnknownIndexFallsBackToGray() throws {
+        // A p1 past the end of the group must not crash or read out of bounds.
+        let colors = try parseColors(makeColorGroupModelXML(
+            colors: ["#FF0000"],
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(v1: 0, v2: 1, v3: 2, pid: 1, p1: 7, p2: 7, p3: 7)]
+        ))
+        let (c0, _, _) = try XCTUnwrap(colors?.first)
+        XCTAssertEqual(c0.x, 0.75, accuracy: 1e-3)
+        XCTAssertEqual(c0.y, 0.75, accuracy: 1e-3)
+        XCTAssertEqual(c0.z, 0.75, accuracy: 1e-3)
     }
 
     // MARK: - Build Item Transform Tests

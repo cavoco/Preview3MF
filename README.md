@@ -17,7 +17,9 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 - **Auto-rotating model** — spins around the vertical axis so you can see all sides
 - **Interactive controls** — orbit and zoom with your mouse/trackpad in the preview
 - **Model info overlay** — triangle count, object count, and dimensions parsed from the file
-- **Color support** — renders per-object/per-triangle material colors when present
+- **Color support** — renders per-object/per-triangle colors from both `<basematerials>`
+  and the 3MF Materials & Properties extension (`<m:colorgroup>`), with or without a
+  namespace prefix
 - **Dark mode** — preview and host app adapt to the system appearance
 - **Finder thumbnails** — rendered icons for `.3mf` files, reusing the slicer's embedded preview when available
 - **Multi-object support** — handles files with multiple mesh objects (Bambu Studio, PrusaSlicer, etc.)
