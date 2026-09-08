@@ -11,9 +11,11 @@
 		A100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000002 /* ContentView.swift */; };
 		A100000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A200000003 /* Assets.xcassets */; };
 		A100000004 /* ThreeMFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000010 /* ThreeMFParser.swift */; };
+		A100000091 /* SlicerProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000099 /* SlicerProject.swift */; };
 		A100000005 /* SceneBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000011 /* SceneBuilder.swift */; };
 		A100000006 /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000020 /* PreviewViewController.swift */; };
 		A100000007 /* ThreeMFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000010 /* ThreeMFParser.swift */; };
+		A100000092 /* SlicerProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000099 /* SlicerProject.swift */; };
 		A100000008 /* SceneBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000011 /* SceneBuilder.swift */; };
 		A100000009 /* PreviewExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A300000002 /* PreviewExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A100000010 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A500000001 /* ZIPFoundation */; };
@@ -23,6 +25,7 @@
 		A100000021 /* SceneBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000031 /* SceneBuilderTests.swift */; };
 		A100000030 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000040 /* ThumbnailProvider.swift */; };
 		A100000031 /* ThreeMFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000010 /* ThreeMFParser.swift */; };
+		A100000093 /* SlicerProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000099 /* SlicerProject.swift */; };
 		A100000032 /* SceneBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000011 /* SceneBuilder.swift */; };
 		A100000033 /* ThumbnailExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A300000007 /* ThumbnailExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A100000034 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A500000004 /* ZIPFoundation */; };
@@ -75,6 +78,7 @@
 		A200000005 /* Preview3MF.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Preview3MF.entitlements; sourceTree = "<group>"; };
 		A200000010 /* ThreeMFParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreeMFParser.swift; sourceTree = "<group>"; };
 		A200000011 /* SceneBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneBuilder.swift; sourceTree = "<group>"; };
+		A200000099 /* SlicerProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlicerProject.swift; sourceTree = "<group>"; };
 		A200000020 /* PreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewViewController.swift; sourceTree = "<group>"; };
 		A200000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A200000022 /* PreviewExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PreviewExtension.entitlements; sourceTree = "<group>"; };
@@ -164,6 +168,7 @@
 			children = (
 				A200000010 /* ThreeMFParser.swift */,
 				A200000011 /* SceneBuilder.swift */,
+				A200000099 /* SlicerProject.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -349,6 +354,7 @@
 				A100000001 /* Preview3MFApp.swift in Sources */,
 				A100000002 /* ContentView.swift in Sources */,
 				A100000004 /* ThreeMFParser.swift in Sources */,
+				A100000091 /* SlicerProject.swift in Sources */,
 				A100000005 /* SceneBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -359,6 +365,7 @@
 			files = (
 				A100000006 /* PreviewViewController.swift in Sources */,
 				A100000007 /* ThreeMFParser.swift in Sources */,
+				A100000092 /* SlicerProject.swift in Sources */,
 				A100000008 /* SceneBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -378,6 +385,7 @@
 			files = (
 				A100000030 /* ThumbnailProvider.swift in Sources */,
 				A100000031 /* ThreeMFParser.swift in Sources */,
+				A100000093 /* SlicerProject.swift in Sources */,
 				A100000032 /* SceneBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

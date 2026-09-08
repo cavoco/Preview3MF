@@ -26,6 +26,11 @@ struct ModelMetadata {
 struct ParseResult {
     var items: [BuildItem]
     var metadata: ModelMetadata
+    /// Number of build plates the slicer saved in this project, 0 when it is not a
+    /// multi-plate slicer project.
+    var plateCount: Int = 0
+    /// Zero-based index of the plate actually rendered, when only one of several was kept.
+    var plateIndex: Int?
 
     var totalTriangles: Int {
         items.reduce(0) { $0 + $1.mesh.triangles.count }
@@ -87,6 +92,9 @@ final class ThreeMFParser {
 
     static func parse(fileAt url: URL) throws -> ParseResult {
         let archive = try openArchive(fileAt: url)
+        // Bambu/Orca keep colour, plate layout and boolean-part roles in their own files
+        // under Metadata/. Absent for spec-only 3MFs, in which case this is all no-ops.
+        let project = SlicerProject.read(from: archive)
 
         // Collect all .model entries — mesh may be in 3D/3dmodel.model or 3D/Objects/*.model
         var modelEntries: [Entry] = []
@@ -153,6 +161,27 @@ final class ThreeMFParser {
             }
         }
 
+        // Every plate in a multi-plate project shares one coordinate space, laid out side by
+        // side, so rendering all build items together scatters the plates across a ~380mm
+        // span and makes the reported dimensions meaningless. Keep a single plate: the first
+        // one that actually holds something.
+        //
+        // Captured before filtering so the safety net below cannot resurrect the objects
+        // that plate filtering just removed.
+        let originalBuildItemIDs = Set(allBuildItems.map { $0.objectID })
+        var plateIndex: Int?
+        if !project.plates.isEmpty,
+           let index = project.plates.firstIndex(where: { plate in
+               plate.contains { originalBuildItemIDs.contains($0) }
+           }) {
+            let keep = Set(project.plates[index])
+            let filtered = allBuildItems.filter { keep.contains($0.objectID) }
+            if !filtered.isEmpty {
+                allBuildItems = filtered
+                plateIndex = index
+            }
+        }
+
         // Objects referenced by a <component> are assembly parts, not standalone roots.
         let componentChildIDs = Set(allComponents.values.flatMap { $0.map { $0.objectID } })
 
@@ -167,10 +196,30 @@ final class ThreeMFParser {
 
         // Flatten an object into (mesh, world-transform) pairs, following <component>
         // references. `visited` breaks reference cycles in malformed files.
-        func expand(_ objectID: Int, _ transform: simd_float4x4, _ visited: Set<Int>) -> [BuildItem] {
+        // `inheritedColor` carries an object's filament colour down to the component meshes
+        // that actually hold its geometry — the slicer records the filament slot on the
+        // container object, one level above the mesh.
+        func expand(
+            _ objectID: Int,
+            _ transform: simd_float4x4,
+            _ visited: Set<Int>,
+            _ inheritedColor: SIMD4<Float>?
+        ) -> [BuildItem] {
             guard !visited.contains(objectID), visited.count < 64 else { return [] }
+            // Negative parts are boolean cutting tools. They shape other geometry and are
+            // never printed, so rendering them puts solid blocks through the model.
+            guard !project.negativeParts.contains(objectID) else { return [] }
+
+            let color = project.color(forObject: objectID) ?? inheritedColor
             var out: [BuildItem] = []
-            if let mesh = allObjects[objectID] {
+            if var mesh = allObjects[objectID] {
+                // Only where the model XML carried no colour of its own — the standard
+                // material extensions outrank the slicer's sidecar metadata.
+                if mesh.triangleColors == nil, let color {
+                    mesh.triangleColors = Array(
+                        repeating: (color, color, color), count: mesh.triangles.count
+                    )
+                }
                 out.append(BuildItem(mesh: mesh, transform: transform))
             }
             if let components = allComponents[objectID] {
@@ -178,7 +227,7 @@ final class ThreeMFParser {
                 nextVisited.insert(objectID)
                 for component in components {
                     // Column-vector nesting: world = parent · component (parent on the left).
-                    out += expand(component.objectID, transform * component.transform, nextVisited)
+                    out += expand(component.objectID, transform * component.transform, nextVisited, color)
                 }
             }
             return out
@@ -186,21 +235,25 @@ final class ThreeMFParser {
 
         var result: [BuildItem] = []
         for item in allBuildItems {
-            result += expand(item.objectID, item.transform, [])
+            result += expand(item.objectID, item.transform, [], nil)
         }
 
         // Safety net: render any mesh reached by neither a build item nor a component.
-        let buildItemIDs = Set(allBuildItems.map { $0.objectID })
         for id in allObjects.keys.sorted()
-        where !buildItemIDs.contains(id) && !componentChildIDs.contains(id) {
-            result.append(BuildItem(mesh: allObjects[id]!, transform: matrix_identity_float4x4))
+        where !originalBuildItemIDs.contains(id) && !componentChildIDs.contains(id) {
+            result += expand(id, matrix_identity_float4x4, [], nil)
         }
 
         guard !result.isEmpty else {
             throw ThreeMFParserError.parsingFailed("No mesh data found in any model file")
         }
 
-        return ParseResult(items: result, metadata: metadata)
+        return ParseResult(
+            items: result,
+            metadata: metadata,
+            plateCount: project.plates.count,
+            plateIndex: plateIndex
+        )
     }
 
     /// Extract a pre-rendered preview image embedded in the .3mf archive without parsing geometry.

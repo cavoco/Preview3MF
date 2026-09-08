@@ -16,3 +16,7 @@ xcuserdata/
 
 ## Claude
 .claude/
+
+# Local test models (third-party, not ours to redistribute)
+*.3mf
+!Preview3MFTests/Fixtures/*.3mf

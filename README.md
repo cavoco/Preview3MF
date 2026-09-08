@@ -23,6 +23,9 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 - **Dark mode** — preview and host app adapt to the system appearance
 - **Finder thumbnails** — rendered icons for `.3mf` files, reusing the slicer's embedded preview when available
 - **Multi-object support** — handles files with multiple mesh objects (Bambu Studio, PrusaSlicer, etc.)
+- **Slicer project files** — reads Bambu Studio / OrcaSlicer projects properly: filament
+  colours per object, one build plate at a time rather than every plate at once, and boolean
+  "negative parts" left out of the render
 - **Drag-and-drop** — drop `.3mf` files into the host app for inline preview
 - **Automatic updates** — signed updates delivered through Sparkle
 

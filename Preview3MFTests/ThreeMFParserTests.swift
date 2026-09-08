@@ -752,6 +752,206 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(Set(colors.map { "\($0.0)" }).count, 6)
     }
 
+    // MARK: - Slicer Project Metadata (Bambu Studio / OrcaSlicer)
+
+    /// Builds a package shaped the way Bambu Studio and OrcaSlicer write one: container
+    /// objects whose geometry lives in component meshes, with filament slots, boolean-part
+    /// roles and plate assignments held in sidecar files under `Metadata/`.
+    private func makeSlicerProjectArchive(
+        filamentColours: [String],
+        objects: [(id: Int, extruder: Int?, components: [Int])],
+        meshes: [Int],
+        negativeParts: [Int] = [],
+        plates: [[Int]],
+        includeMetadata: Bool = true
+    ) -> Data {
+        var model = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        model += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">"
+        model += "<resources>"
+        for meshID in meshes {
+            model += "<object id=\"\(meshID)\" type=\"model\"><mesh><vertices>"
+            model += "<vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/><vertex x=\"0\" y=\"1\" z=\"0\"/>"
+            model += "</vertices><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\"/></triangles></mesh></object>"
+        }
+        for object in objects {
+            model += "<object id=\"\(object.id)\" type=\"model\"><components>"
+            for component in object.components {
+                model += "<component objectid=\"\(component)\"/>"
+            }
+            model += "</components></object>"
+        }
+        model += "</resources><build>"
+        for object in objects {
+            model += "<item objectid=\"\(object.id)\"/>"
+        }
+        model += "</build></model>"
+
+        var entries: [MiniZIP.Entry] = [.init(path: "3D/3dmodel.model", data: Data(model.utf8))]
+
+        if includeMetadata {
+            let palette = filamentColours.map { "\"\($0)\"" }.joined(separator: ", ")
+            let settings = "{\"filament_colour\": [\(palette)], \"filament_type\": [\"PLA\"]}"
+            entries.append(.init(path: "Metadata/project_settings.config", data: Data(settings.utf8)))
+
+            var config = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config>"
+            for object in objects {
+                config += "<object id=\"\(object.id)\">"
+                config += "<metadata key=\"name\" value=\"object\(object.id)\"/>"
+                if let extruder = object.extruder {
+                    config += "<metadata key=\"extruder\" value=\"\(extruder)\"/>"
+                }
+                for component in object.components {
+                    let subtype = negativeParts.contains(component) ? "negative_part" : "normal_part"
+                    config += "<part id=\"\(component)\" subtype=\"\(subtype)\">"
+                    // Parts carry their own extruder key; it must not be read as the object's.
+                    config += "<metadata key=\"extruder\" value=\"0\"/>"
+                    config += "</part>"
+                }
+                config += "</object>"
+            }
+            for (index, plate) in plates.enumerated() {
+                config += "<plate><metadata key=\"plater_id\" value=\"\(index + 1)\"/>"
+                for objectID in plate {
+                    config += "<model_instance><metadata key=\"object_id\" value=\"\(objectID)\"/>"
+                    config += "<metadata key=\"instance_id\" value=\"0\"/></model_instance>"
+                }
+                config += "</plate>"
+            }
+            config += "</config>"
+            entries.append(.init(path: "Metadata/model_settings.config", data: Data(config.utf8)))
+        }
+
+        return MiniZIP.createArchive(entries: entries)
+    }
+
+    private func parseArchive(_ data: Data) throws -> ParseResult {
+        let url = try writeTempFile(data)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try ThreeMFParser.parse(fileAt: url)
+    }
+
+    func testSlicerFilamentColoursApplyPerObject() throws {
+        // The filament slot sits on the container object, one level above the mesh, so the
+        // colour has to reach the component that actually holds geometry.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF"],
+            objects: [(id: 2, extruder: 1, components: [10]),
+                      (id: 3, extruder: 2, components: [11])],
+            meshes: [10, 11],
+            plates: [[2, 3]]
+        ))
+        XCTAssertEqual(result.items.count, 2)
+        XCTAssertTrue(result.hasColors)
+        let first = try XCTUnwrap(result.items[0].mesh.triangleColors?.first)
+        let second = try XCTUnwrap(result.items[1].mesh.triangleColors?.first)
+        XCTAssertEqual(first.0, SIMD4<Float>(1, 0, 0, 1))
+        XCTAssertEqual(second.0, SIMD4<Float>(0, 0, 1, 1))
+    }
+
+    func testOnlyFirstPlateIsRendered() throws {
+        // Plates share one coordinate space, so rendering them all scatters the model.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10]),
+                      (id: 3, extruder: 1, components: [11]),
+                      (id: 4, extruder: 1, components: [12])],
+            meshes: [10, 11, 12],
+            plates: [[2, 3], [4]]
+        ))
+        XCTAssertEqual(result.plateCount, 2)
+        XCTAssertEqual(result.plateIndex, 0)
+        XCTAssertEqual(result.items.count, 2, "only plate 1's two objects should render")
+    }
+
+    func testNegativePartsAreNotRendered() throws {
+        // A negative part is a boolean cutting tool; rendering it puts a solid block
+        // through the model.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10, 11])],
+            meshes: [10, 11],
+            negativeParts: [11],
+            plates: [[2]]
+        ))
+        XCTAssertEqual(result.items.count, 1)
+        XCTAssertEqual(result.totalTriangles, 1)
+    }
+
+    func testPlateWithNoMatchingBuildItemsIsSkipped() throws {
+        // First plate references an object that never made it into <build>; fall through
+        // to the first plate that actually has something on it.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 3, extruder: 1, components: [11])],
+            meshes: [11],
+            plates: [[99], [3]]
+        ))
+        XCTAssertEqual(result.plateIndex, 1)
+        XCTAssertEqual(result.items.count, 1)
+    }
+
+    func testModelXMLColoursOutrankSlicerMetadata() throws {
+        // A file carrying standard colour data should keep it, not have the slicer's
+        // sidecar palette painted over the top.
+        var model = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        model += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\""
+        model += " xmlns:m=\"http://schemas.microsoft.com/3dmanufacturing/material/2015/02\">"
+        model += "<resources><m:colorgroup id=\"1\"><m:color color=\"#00FF00\"/></m:colorgroup>"
+        model += "<object id=\"2\" type=\"model\"><mesh><vertices>"
+        model += "<vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/><vertex x=\"0\" y=\"1\" z=\"0\"/>"
+        model += "</vertices><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\" pid=\"1\" p1=\"0\" p2=\"0\" p3=\"0\"/>"
+        model += "</triangles></mesh></object></resources><build><item objectid=\"2\"/></build></model>"
+
+        let settings = "{\"filament_colour\": [\"#FF0000\"]}"
+        var config = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config>"
+        config += "<object id=\"2\"><metadata key=\"extruder\" value=\"1\"/></object>"
+        config += "<plate><model_instance><metadata key=\"object_id\" value=\"2\"/></model_instance></plate>"
+        config += "</config>"
+
+        let result = try parseArchive(MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: Data(model.utf8)),
+            .init(path: "Metadata/project_settings.config", data: Data(settings.utf8)),
+            .init(path: "Metadata/model_settings.config", data: Data(config.utf8)),
+        ]))
+        let colour = try XCTUnwrap(result.items[0].mesh.triangleColors?.first)
+        XCTAssertEqual(colour.0, SIMD4<Float>(0, 1, 0, 1), "colorgroup green must win over filament red")
+    }
+
+    func testPackageWithoutSlicerMetadataIsUnchanged() throws {
+        // A spec-only 3MF must be unaffected by any of this.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: [],
+            objects: [(id: 2, extruder: nil, components: [10]),
+                      (id: 3, extruder: nil, components: [11])],
+            meshes: [10, 11],
+            plates: [],
+            includeMetadata: false
+        ))
+        XCTAssertEqual(result.plateCount, 0)
+        XCTAssertNil(result.plateIndex)
+        XCTAssertEqual(result.items.count, 2)
+        XCTAssertFalse(result.hasColors)
+    }
+
+    func testMalformedSlicerMetadataIsIgnored() throws {
+        // Truncated JSON and XML must degrade to "no slicer metadata", not throw.
+        var model = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        model += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">"
+        model += "<resources><object id=\"2\" type=\"model\"><mesh><vertices>"
+        model += "<vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/><vertex x=\"0\" y=\"1\" z=\"0\"/>"
+        model += "</vertices><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\"/></triangles></mesh></object>"
+        model += "</resources><build><item objectid=\"2\"/></build></model>"
+
+        let result = try parseArchive(MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: Data(model.utf8)),
+            .init(path: "Metadata/project_settings.config", data: Data("{\"filament_colour\": [".utf8)),
+            .init(path: "Metadata/model_settings.config", data: Data("<config><object id=".utf8)),
+        ]))
+        XCTAssertEqual(result.items.count, 1)
+        XCTAssertEqual(result.plateCount, 0)
+        XCTAssertFalse(result.hasColors)
+    }
+
     // MARK: - Build Item Transform Tests
 
     func testBuildItemWithTransform() throws {
