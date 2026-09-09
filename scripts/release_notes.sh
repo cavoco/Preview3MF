@@ -2,8 +2,8 @@
 # Print the user-facing commit subjects between two refs, one per line.
 #
 # These lines end up in Sparkle's update dialog, so commits that changed only the
-# landing page, README, CI config or release plumbing are dropped — they describe
-# nothing a user of the app would notice. Version bumps go too.
+# landing page, README, CI config, tests or release plumbing are dropped — they
+# describe nothing a user of the app would notice. Version bumps go too.
 #
 # Usage: release_notes.sh <previous-ref> <current-ref>
 set -euo pipefail
@@ -17,7 +17,7 @@ PREVIOUS="$1"
 CURRENT="$2"
 
 # Paths that never justify a line in an update dialog on their own.
-IGNORED='^(docs/|scripts/|\.github/|README\.md$|LICENSE$|\.gitignore$)|^$'
+IGNORED='^(docs/|scripts/|\.github/|Preview3MFTests/|README\.md$|LICENSE$|\.gitignore$)|^$'
 
 # tformat: (not format:) terminates every line, including the last. With format:
 # the oldest commit arrives without a trailing newline and `read` drops it at EOF.
