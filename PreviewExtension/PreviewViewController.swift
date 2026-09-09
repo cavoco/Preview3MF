@@ -88,14 +88,6 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         render(updated, animated: false)
     }
 
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        // keyDown only reaches the scene view while it is first responder, and nothing
-        // else here wants the keyboard. Whether the Quick Look panel lets the arrows
-        // through to us at all is a separate question this cannot settle.
-        view.window?.makeFirstResponder(sceneView)
-    }
-
     private var currentAppearance: SceneBuilder.Appearance {
         let name = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
         return name == .darkAqua ? .dark : .light
@@ -192,9 +184,14 @@ final class ZoomableSCNView: SCNView {
     /// The initial framing distance, captured on first scroll, used to bound zoom range.
     private var baselineDistance: CGFloat?
 
-    /// Left/right arrow, as -1/+1. Whether these ever arrive depends on the host: the Quick
-    /// Look panel claims the arrow keys for moving through the Finder selection, so this
-    /// stays a convenience on top of the on-screen control, never the only way to page.
+    /// Left/right arrow, as -1/+1.
+    ///
+    /// Confirmed dead inside Quick Look and kept anyway, because this class is compiled
+    /// into the host app too, where the keys do work. The extension is a remote view
+    /// service: its view is hosted in the Quick Look panel's process, so nothing here can
+    /// become first responder of that window, and the panel claims the arrows for stepping
+    /// through the Finder selection regardless. The on-screen control is what has to work
+    /// in both places.
     var onHorizontalArrow: ((Int) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }

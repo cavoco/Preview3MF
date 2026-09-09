@@ -26,8 +26,9 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 - **Slicer project files** — reads Bambu Studio / OrcaSlicer projects properly: filament
   colours per object, one build plate at a time rather than every plate at once, and boolean
   "negative parts" left out of the render
-- **Plate paging** — multi-plate projects show a `‹ Plate 1/3 ›` control (and respond to the
-  left/right arrow keys where the host delivers them), named where the slicer named them
+- **Plate paging** — multi-plate projects show a `‹ Plate 1/3 ›` control, named where the
+  slicer named the plate. In the app window the left/right arrow keys work too; in Quick
+  Look they don't, because the preview panel uses them to step through the Finder selection
 - **Drag-and-drop** — drop `.3mf` files into the host app for inline preview
 - **Automatic updates** — signed updates delivered through Sparkle
 
