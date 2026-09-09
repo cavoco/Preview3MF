@@ -763,6 +763,7 @@ final class ThreeMFParserTests: XCTestCase {
         meshes: [Int],
         negativeParts: [Int] = [],
         plates: [[Int]],
+        plateNames: [String?] = [],
         includeMetadata: Bool = true
     ) -> Data {
         var model = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -811,6 +812,9 @@ final class ThreeMFParserTests: XCTestCase {
             }
             for (index, plate) in plates.enumerated() {
                 config += "<plate><metadata key=\"plater_id\" value=\"\(index + 1)\"/>"
+                if index < plateNames.count, let name = plateNames[index] {
+                    config += "<metadata key=\"plater_name\" value=\"\(name)\"/>"
+                }
                 for objectID in plate {
                     config += "<model_instance><metadata key=\"object_id\" value=\"\(objectID)\"/>"
                     config += "<metadata key=\"instance_id\" value=\"0\"/></model_instance>"
@@ -950,6 +954,69 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.plateCount, 0)
         XCTAssertFalse(result.hasColors)
+    }
+
+    func testAllPlatesAreAvailableForPaging() throws {
+        // The other plates must survive parsing, or there is nothing to page to.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF"],
+            objects: [(id: 2, extruder: 1, components: [10]),
+                      (id: 3, extruder: 2, components: [11]),
+                      (id: 4, extruder: 1, components: [12])],
+            meshes: [10, 11, 12],
+            plates: [[2], [3, 4]],
+            plateNames: ["Box", nil]
+        ))
+        XCTAssertEqual(result.plateCount, 2)
+        XCTAssertEqual(result.plateIndex, 0)
+        XCTAssertEqual(result.items.count, 1)
+
+        XCTAssertEqual(result.plates[0].name, "Box")
+        XCTAssertNil(result.plates[1].name, "an unnamed plate should stay nil, not empty string")
+        XCTAssertEqual(result.plates[1].items.count, 2)
+    }
+
+    func testShowingPlateSwitchesGeometry() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF"],
+            objects: [(id: 2, extruder: 1, components: [10]),
+                      (id: 3, extruder: 2, components: [11])],
+            meshes: [10, 11],
+            plates: [[2], [3]]
+        ))
+        let second = try XCTUnwrap(result.showingPlate(1))
+        XCTAssertEqual(second.plateIndex, 1)
+        XCTAssertEqual(second.items.count, 1)
+        let colour = try XCTUnwrap(second.items[0].mesh.triangleColors?.first)
+        XCTAssertEqual(colour.0, SIMD4<Float>(0, 0, 1, 1), "plate 2's object is on filament 2")
+        // Metadata is a property of the file, not the plate, so it must carry across.
+        XCTAssertEqual(second.metadata.title, result.metadata.title)
+    }
+
+    func testShowingPlateRejectsOutOfRange() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            plates: [[2]]
+        ))
+        XCTAssertNil(result.showingPlate(1))
+        XCTAssertNil(result.showingPlate(-1))
+        XCTAssertNotNil(result.showingPlate(0))
+    }
+
+    func testEmptyPlatesAreKeptSoNumberingMatchesTheSlicer() throws {
+        // Plate 1 holds an object that never reached <build>. It stays in the list as an
+        // empty plate so "plate 2 of 2" still lines up with what the slicer shows.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 3, extruder: 1, components: [11])],
+            meshes: [11],
+            plates: [[99], [3]]
+        ))
+        XCTAssertEqual(result.plateCount, 2)
+        XCTAssertTrue(result.plates[0].items.isEmpty)
+        XCTAssertEqual(result.plateIndex, 1, "should open on the first plate with content")
     }
 
     // MARK: - Build Item Transform Tests

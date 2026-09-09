@@ -23,14 +23,35 @@ struct ModelMetadata {
     var application: String?
 }
 
+/// One build plate's worth of geometry, ready to render.
+struct PlateContents {
+    /// The name given in the slicer, when the user set one ("Coin Lid").
+    var name: String?
+    var items: [BuildItem]
+}
+
 struct ParseResult {
+    /// Geometry for the plate currently being shown — or everything, for a file that has
+    /// no plates.
     var items: [BuildItem]
     var metadata: ModelMetadata
-    /// Number of build plates the slicer saved in this project, 0 when it is not a
+    /// Every plate in the project, in slicer order. Empty when the file is not a
     /// multi-plate slicer project.
-    var plateCount: Int = 0
-    /// Zero-based index of the plate actually rendered, when only one of several was kept.
+    var plates: [PlateContents] = []
+    /// Index into `plates` that `items` came from.
     var plateIndex: Int?
+
+    var plateCount: Int { plates.count }
+
+    /// The same result showing a different plate. Returns nil for an out-of-range index,
+    /// so callers can wrap or clamp as they prefer.
+    func showingPlate(_ index: Int) -> ParseResult? {
+        guard plates.indices.contains(index) else { return nil }
+        var copy = self
+        copy.items = plates[index].items
+        copy.plateIndex = index
+        return copy
+    }
 
     var totalTriangles: Int {
         items.reduce(0) { $0 + $1.mesh.triangles.count }
@@ -161,26 +182,7 @@ final class ThreeMFParser {
             }
         }
 
-        // Every plate in a multi-plate project shares one coordinate space, laid out side by
-        // side, so rendering all build items together scatters the plates across a ~380mm
-        // span and makes the reported dimensions meaningless. Keep a single plate: the first
-        // one that actually holds something.
-        //
-        // Captured before filtering so the safety net below cannot resurrect the objects
-        // that plate filtering just removed.
         let originalBuildItemIDs = Set(allBuildItems.map { $0.objectID })
-        var plateIndex: Int?
-        if !project.plates.isEmpty,
-           let index = project.plates.firstIndex(where: { plate in
-               plate.contains { originalBuildItemIDs.contains($0) }
-           }) {
-            let keep = Set(project.plates[index])
-            let filtered = allBuildItems.filter { keep.contains($0.objectID) }
-            if !filtered.isEmpty {
-                allBuildItems = filtered
-                plateIndex = index
-            }
-        }
 
         // Objects referenced by a <component> are assembly parts, not standalone roots.
         let componentChildIDs = Set(allComponents.values.flatMap { $0.map { $0.objectID } })
@@ -233,10 +235,13 @@ final class ThreeMFParser {
             return out
         }
 
-        var result: [BuildItem] = []
+        // Expand each build item exactly once; plates are then just groupings of the result.
+        var expanded: [(objectID: Int, items: [BuildItem])] = []
         for item in allBuildItems {
-            result += expand(item.objectID, item.transform, [], nil)
+            expanded.append((item.objectID, expand(item.objectID, item.transform, [], nil)))
         }
+
+        var result = expanded.flatMap { $0.items }
 
         // Safety net: render any mesh reached by neither a build item nor a component.
         for id in allObjects.keys.sorted()
@@ -248,11 +253,24 @@ final class ThreeMFParser {
             throw ThreeMFParserError.parsingFailed("No mesh data found in any model file")
         }
 
+        // Every plate shares one coordinate space, laid out side by side, so rendering them
+        // together scatters the model across the bed and makes the dimensions meaningless.
+        // Group by plate and show one; the caller can page through the rest. Plates the
+        // slicer declared but left empty are kept, so plate numbering matches the slicer's.
+        let plates: [PlateContents] = project.plates.map { plate in
+            let members = Set(plate.objectIDs)
+            return PlateContents(
+                name: plate.name,
+                items: expanded.filter { members.contains($0.objectID) }.flatMap { $0.items }
+            )
+        }
+        let shownPlate = plates.firstIndex { !$0.items.isEmpty }
+
         return ParseResult(
-            items: result,
+            items: shownPlate.map { plates[$0].items } ?? result,
             metadata: metadata,
-            plateCount: project.plates.count,
-            plateIndex: plateIndex
+            plates: plates,
+            plateIndex: shownPlate
         )
     }
 

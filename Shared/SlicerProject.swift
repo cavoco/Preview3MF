@@ -18,8 +18,15 @@ struct SlicerProject {
     var objectExtruder: [Int: Int] = [:]
     /// Object ids that are subtractive — boolean cutting tools, not printed geometry.
     var negativeParts: Set<Int> = []
-    /// Build plates in file order, each listing the object ids placed on it.
-    var plates: [[Int]] = []
+    /// Build plates in file order.
+    var plates: [Plate] = []
+
+    /// One build plate: the objects placed on it, plus the name the user gave it in the
+    /// slicer ("Coin Lid"), which is blank far more often than not.
+    struct Plate {
+        var name: String?
+        var objectIDs: [Int]
+    }
 
     var isEmpty: Bool {
         filamentColors.isEmpty && objectExtruder.isEmpty && negativeParts.isEmpty && plates.isEmpty
@@ -95,13 +102,14 @@ struct SlicerProject {
 final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
     var objectExtruder: [Int: Int] = [:]
     var negativeParts: Set<Int> = []
-    var plates: [[Int]] = []
+    var plates: [SlicerProject.Plate] = []
 
     private var currentObjectID: Int?
     private var currentPartID: Int?
     private var inPlate = false
     private var inModelInstance = false
     private var currentPlateObjects: [Int] = []
+    private var currentPlateName: String?
 
     func parser(
         _ parser: XMLParser,
@@ -122,6 +130,7 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
         case "plate":
             inPlate = true
             currentPlateObjects = []
+            currentPlateName = nil
         case "model_instance":
             inModelInstance = true
         case "metadata":
@@ -131,6 +140,9 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
             }
             if key == "object_id", inPlate, inModelInstance, let id = Int(value) {
                 currentPlateObjects.append(id)
+            }
+            if key == "plater_name", inPlate, !inModelInstance, !value.isEmpty {
+                currentPlateName = value
             }
         default:
             break
@@ -152,8 +164,9 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
         case "model_instance":
             inModelInstance = false
         case "plate":
-            plates.append(currentPlateObjects)
+            plates.append(SlicerProject.Plate(name: currentPlateName, objectIDs: currentPlateObjects))
             currentPlateObjects = []
+            currentPlateName = nil
             inPlate = false
         default:
             break

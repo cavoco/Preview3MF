@@ -4,8 +4,11 @@ import SceneKit
 
 class PreviewViewController: NSViewController, QLPreviewingController {
 
-    private var sceneView: SCNView!
+    private var sceneView: ZoomableSCNView!
     private var infoLabel: NSTextField!
+    private var plateControl: NSStackView!
+    private var plateLabel: NSTextField!
+    private var result: ParseResult?
 
     override var nibName: NSNib.Name? { nil }
 
@@ -28,12 +31,61 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(infoLabel)
 
+        // Top-right, clear of the info label along the bottom edge.
+        plateLabel = NSTextField(labelWithString: "")
+        plateLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        plateLabel.alignment = .center
+
+        plateControl = NSStackView(views: [
+            plateButton("chevron.left", "Previous plate", #selector(previousPlate)),
+            plateLabel,
+            plateButton("chevron.right", "Next plate", #selector(nextPlate)),
+        ])
+        plateControl.orientation = .horizontal
+        plateControl.spacing = 6
+        plateControl.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+        plateControl.wantsLayer = true
+        plateControl.layer?.cornerRadius = 6
+        plateControl.isHidden = true
+        plateControl.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(plateControl)
+
         NSLayoutConstraint.activate([
             infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
             infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
+            plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
         ])
 
+        sceneView.onHorizontalArrow = { [weak self] delta in self?.stepPlate(delta) }
+
         self.view = view
+    }
+
+    private func plateButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        button.isBordered = false
+        button.bezelStyle = .inline
+        button.setAccessibilityLabel(label)
+        return button
+    }
+
+    @objc private func previousPlate() { stepPlate(-1) }
+    @objc private func nextPlate() { stepPlate(1) }
+
+    /// Page to the next plate that actually holds geometry, wrapping at the ends. Plates the
+    /// slicer left empty stay in the numbering but are skipped over.
+    private func stepPlate(_ delta: Int) {
+        guard let result, result.plateCount > 1, let current = result.plateIndex else { return }
+        var next = current
+        for _ in 0..<result.plateCount {
+            next = (next + delta + result.plateCount) % result.plateCount
+            if !result.plates[next].items.isEmpty { break }
+        }
+        guard next != current, let updated = result.showingPlate(next) else { return }
+        self.result = updated
+        render(updated, animated: false)
     }
 
     private var currentAppearance: SceneBuilder.Appearance {
@@ -44,23 +96,49 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
-            let appearance = currentAppearance
-            let scene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
-            sceneView.scene = scene
+            self.result = result
+            render(result, animated: true)
+            handler(nil)
+        } catch {
+            handler(error)
+        }
+    }
+
+    private func render(_ result: ParseResult, animated: Bool) {
+        let appearance = currentAppearance
+        let scene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
+        sceneView.scene = scene
+        if animated {
             // Hold the spin still briefly so the first-frame geometry upload doesn't
             // surface as a jump in the rotation.
             scene.isPaused = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 self?.sceneView.scene?.isPaused = false
             }
-            infoLabel.stringValue = buildInfoString(result)
-            infoLabel.textColor = appearance == .dark
-                ? NSColor(white: 0.8, alpha: 1.0)
-                : NSColor(white: 0.3, alpha: 1.0)
-            handler(nil)
-        } catch {
-            handler(error)
         }
+
+        let foreground = appearance == .dark
+            ? NSColor(white: 0.8, alpha: 1.0)
+            : NSColor(white: 0.3, alpha: 1.0)
+        infoLabel.stringValue = buildInfoString(result)
+        infoLabel.textColor = foreground
+        plateLabel.textColor = foreground
+        plateControl.layer?.backgroundColor = NSColor(white: appearance == .dark ? 0 : 1,
+                                                      alpha: 0.5).cgColor
+
+        // Only worth showing when there is somewhere to page to.
+        let populated = result.plates.filter { !$0.items.isEmpty }.count
+        plateControl.isHidden = populated < 2
+        plateLabel.stringValue = plateLabelText(result)
+    }
+
+    private func plateLabelText(_ result: ParseResult) -> String {
+        guard let index = result.plateIndex else { return "" }
+        let counter = "Plate \(index + 1)/\(result.plateCount)"
+        if let name = result.plates[index].name, !name.isEmpty {
+            return "\(counter) · \(name)"
+        }
+        return counter
     }
 
     private func buildInfoString(_ result: ParseResult) -> String {
@@ -105,6 +183,21 @@ final class ZoomableSCNView: SCNView {
 
     /// The initial framing distance, captured on first scroll, used to bound zoom range.
     private var baselineDistance: CGFloat?
+
+    /// Left/right arrow, as -1/+1. Whether these ever arrive depends on the host: the Quick
+    /// Look panel claims the arrow keys for moving through the Finder selection, so this
+    /// stays a convenience on top of the on-screen control, never the only way to page.
+    var onHorizontalArrow: ((Int) -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 123: onHorizontalArrow?(-1)
+        case 124: onHorizontalArrow?(1)
+        default: super.keyDown(with: event)
+        }
+    }
 
     override func scrollWheel(with event: NSEvent) {
         let controller = defaultCameraController

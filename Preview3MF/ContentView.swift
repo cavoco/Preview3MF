@@ -55,9 +55,15 @@ struct ContentView: View {
             Divider()
 
             if let scene = scene {
-                ZoomableSceneView(scene: scene)
+                ZoomableSceneView(scene: scene, onHorizontalArrow: stepPlate)
                     .frame(minHeight: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .topTrailing) {
+                        if let result = parseResult, populatedPlateCount(result) > 1 {
+                            PlateSwitcher(result: result, step: stepPlate)
+                                .padding(10)
+                        }
+                    }
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
@@ -96,6 +102,25 @@ struct ContentView: View {
             }
             return true
         }
+    }
+
+    private func populatedPlateCount(_ result: ParseResult) -> Int {
+        result.plates.filter { !$0.items.isEmpty }.count
+    }
+
+    /// Page to the next plate holding geometry, wrapping at the ends.
+    private func stepPlate(_ delta: Int) {
+        guard let current = parseResult, current.plateCount > 1,
+              let index = current.plateIndex else { return }
+        var next = index
+        for _ in 0..<current.plateCount {
+            next = (next + delta + current.plateCount) % current.plateCount
+            if !current.plates[next].items.isEmpty { break }
+        }
+        guard next != index, let updated = current.showingPlate(next) else { return }
+        parseResult = updated
+        let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
+        scene = SceneBuilder.buildScene(from: updated.items, appearance: appearance)
     }
 
     private func loadFile(at url: URL) {
@@ -168,6 +193,37 @@ struct ModelInfoView: View {
     }
 }
 
+/// Pages between the build plates of a multi-plate slicer project.
+struct PlateSwitcher: View {
+    let result: ParseResult
+    let step: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { step(-1) } label: { Image(systemName: "chevron.left") }
+                .accessibilityLabel("Previous plate")
+            Text(label)
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+            Button { step(1) } label: { Image(systemName: "chevron.right") }
+                .accessibilityLabel("Next plate")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: Capsule())
+    }
+
+    private var label: String {
+        guard let index = result.plateIndex else { return "" }
+        let counter = "Plate \(index + 1)/\(result.plateCount)"
+        if let name = result.plates[index].name, !name.isEmpty {
+            return "\(counter) · \(name)"
+        }
+        return counter
+    }
+}
+
 struct StatItem: View {
     let label: String
     let value: String
@@ -187,9 +243,11 @@ struct StatItem: View {
 /// `ZoomableSCNView` to intercept the scroll wheel.
 struct ZoomableSceneView: NSViewRepresentable {
     let scene: SCNScene
+    var onHorizontalArrow: ((Int) -> Void)?
 
     func makeNSView(context: Context) -> ZoomableSCNView {
         let view = ZoomableSCNView()
+        view.onHorizontalArrow = onHorizontalArrow
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = true
         view.antialiasingMode = .multisampling4X
@@ -200,6 +258,7 @@ struct ZoomableSceneView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: ZoomableSCNView, context: Context) {
+        nsView.onHorizontalArrow = onHorizontalArrow
         if nsView.scene !== scene {
             nsView.scene = scene
         }
@@ -213,6 +272,19 @@ final class ZoomableSCNView: SCNView {
 
     /// The initial framing distance, captured on first scroll, used to bound zoom range.
     private var baselineDistance: CGFloat?
+
+    /// Left/right arrow, as -1/+1, for paging between build plates.
+    var onHorizontalArrow: ((Int) -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 123: onHorizontalArrow?(-1)
+        case 124: onHorizontalArrow?(1)
+        default: super.keyDown(with: event)
+        }
+    }
 
     override func scrollWheel(with event: NSEvent) {
         let controller = defaultCameraController
