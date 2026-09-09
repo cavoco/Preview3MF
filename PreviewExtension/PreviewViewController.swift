@@ -88,6 +88,14 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         render(updated, animated: false)
     }
 
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        // keyDown only reaches the scene view while it is first responder, and nothing
+        // else here wants the keyboard. Whether the Quick Look panel lets the arrows
+        // through to us at all is a separate question this cannot settle.
+        view.window?.makeFirstResponder(sceneView)
+    }
+
     private var currentAppearance: SceneBuilder.Appearance {
         let name = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
         return name == .darkAqua ? .dark : .light
