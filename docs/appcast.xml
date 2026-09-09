@@ -6,6 +6,15 @@
         <description>Updates for Preview3MF, a Quick Look extension for .3mf files.</description>
         <language>en</language>
         <item>
+            <title>1.0.21</title>
+            <pubDate>Wed, 09 Sep 2026 09:43:27 +0000</pubDate>
+            <sparkle:version>22</sparkle:version>
+            <sparkle:shortVersionString>1.0.21</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul><li>Give the Quick Look scene view the keyboard</li><li>Page between build plates</li><li>Read Bambu / Orca project metadata: filament colours, plates, negative parts</li><li>Render colours from the 3MF Materials &amp; Properties extension</li></ul>]]></description>
+            <enclosure url="https://github.com/cavoco/Preview3MF/releases/download/v1.0.21/Preview3MF-v1.0.21-universal.zip" sparkle:edSignature="N/wWpRU/unRglbQD1ca0qty/YT/YX0K2fg/flQyFlWq1SE7MKrl1jJ61K4kHbJ1LJ8VUP0Z2szZIbY8YLVe6AQ==" length="4476299" type="application/octet-stream"/>
+        </item>
+        <item>
             <title>1.0.20</title>
             <pubDate>Mon, 27 Jul 2026 11:38:52 +0000</pubDate>
             <sparkle:version>21</sparkle:version>
