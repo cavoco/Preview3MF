@@ -64,7 +64,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     private func plateButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        let button = FirstMouseButton(image: image ?? NSImage(), target: self, action: action)
         button.isBordered = false
         button.bezelStyle = .inline
         button.setAccessibilityLabel(label)
@@ -106,20 +106,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     private func render(_ result: ParseResult, animated: Bool) {
         let appearance = currentAppearance
-        let scene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
-        sceneView.scene = scene
-        if animated {
-            // Hold the spin still briefly so the first-frame geometry upload doesn't
-            // surface as a jump in the rotation.
-            scene.isPaused = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.sceneView.scene?.isPaused = false
-            }
-        }
-
         let foreground = appearance == .dark
             ? NSColor(white: 0.8, alpha: 1.0)
             : NSColor(white: 0.3, alpha: 1.0)
+
+        // Text first. It costs nothing to set, and paging should feel immediate even
+        // though rebuilding the geometry behind it does not.
         infoLabel.stringValue = buildInfoString(result)
         infoLabel.textColor = foreground
         plateLabel.textColor = foreground
@@ -130,6 +122,29 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         let populated = result.plates.filter { !$0.items.isEmpty }.count
         plateControl.isHidden = populated < 2
         plateLabel.stringValue = plateLabelText(result)
+
+        let rebuild = { [weak self] in
+            guard let self else { return }
+            let scene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
+            self.sceneView.scene = scene
+            if animated {
+                // Hold the spin still briefly so the first-frame geometry upload doesn't
+                // surface as a jump in the rotation.
+                scene.isPaused = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.sceneView.scene?.isPaused = false
+                }
+            }
+        }
+
+        if animated {
+            // First render of the file: stay synchronous so the preview is complete by the
+            // time preparePreviewOfFile's completion handler reports success.
+            rebuild()
+        } else {
+            // Paging: yield once so the new label paints before the rebuild blocks main.
+            DispatchQueue.main.async(execute: rebuild)
+        }
     }
 
     private func plateLabelText(_ result: ParseResult) -> String {
@@ -176,6 +191,17 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     }
 }
 
+/// A button that responds to the click that also activates its window.
+///
+/// `acceptsFirstMouse` is false by default, which is right for a normal app — you do not
+/// want a stray click on a background window pressing a button. It is wrong here: the Quick
+/// Look panel is frequently not the key window, so the first click on the plate control was
+/// being spent activating it instead. Pressing again then read as a double-click, which
+/// Quick Look handles by opening the file.
+final class FirstMouseButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// An `SCNView` that adds scroll-wheel zoom on top of SceneKit's built-in camera control.
 /// The default controller handles orbit (drag) and trackpad pinch, but ignores the scroll
 /// wheel — this dollies the camera toward/away from its target so mouse users can zoom too.
@@ -195,6 +221,10 @@ final class ZoomableSCNView: SCNView {
     var onHorizontalArrow: ((Int) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
+
+    /// Same reasoning as `FirstMouseButton`: without this the first drag in an inactive
+    /// Quick Look panel is spent activating it rather than orbiting the model.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
