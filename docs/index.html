@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="google-site-verification" content="m9sMwKGgnUYRvpNPA6xim8i6-lfr7zzsQnmdZpkmvWY">
   <title>Preview3MF — 3MF Quick Look &amp; Finder Thumbnails on macOS</title>
-  <meta name="description" content="A free 3MF QuickLook plugin for Mac. Press Space in Finder to see a 3D preview of any .3mf file, plus real 3MF thumbnails on every icon — no slicer needed.">
+  <meta name="description" content="A free 3MF QuickLook plugin for Mac. Press Space in Finder to see a 3D preview of any .3mf file — in full color for Bambu Studio and OrcaSlicer projects — plus real 3MF thumbnails on every icon. No slicer needed.">
   <meta property="og:title" content="Preview3MF — 3MF Quick Look &amp; Finder Thumbnails on macOS">
-  <meta property="og:description" content="Press Space on any .3mf file in Finder to see a 3D preview — no slicer needed.">
+  <meta property="og:description" content="Press Space on any .3mf file in Finder to see a 3D preview, in full color for Bambu and Orca projects — no slicer needed.">
   <meta property="og:image" content="https://cavoco.github.io/Preview3MF/preview.png">
   <meta property="og:image:alt" content="Preview3MF showing a 3D model on a build-plate grid in Quick Look">
   <meta property="og:url" content="https://cavoco.github.io/Preview3MF/">
@@ -15,7 +15,7 @@
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Preview3MF — 3MF Quick Look &amp; Finder Thumbnails on macOS">
-  <meta name="twitter:description" content="Press Space on any .3mf file in Finder to see a 3D preview — no slicer needed.">
+  <meta name="twitter:description" content="Press Space on any .3mf file in Finder to see a 3D preview, in full color for Bambu and Orca projects — no slicer needed.">
   <meta name="twitter:image" content="https://cavoco.github.io/Preview3MF/preview.png">
   <link rel="canonical" href="https://cavoco.github.io/Preview3MF/">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>">
@@ -26,7 +26,7 @@
     "@type": "SoftwareApplication",
     "name": "Preview3MF",
     "alternateName": "3MF QuickLook plugin for Mac",
-    "description": "A macOS Quick Look extension for .3mf files. Press Space in Finder to see a 3D preview of any model, plus real 3MF thumbnails on every Finder icon — no slicer needed.",
+    "description": "A macOS Quick Look extension for .3mf files. Press Space in Finder to see a 3D preview of any model — rendered in your filament colors for Bambu Studio and OrcaSlicer projects — plus real 3MF thumbnails on every Finder icon. No slicer needed.",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS 13 Ventura, macOS 14 Sonoma, macOS 15 Sequoia, macOS 26 Tahoe",
     "screenshot": "https://cavoco.github.io/Preview3MF/preview.png",
@@ -47,6 +47,11 @@
     "@context": "https://schema.org",
     "@type": "FAQPage",
     "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Does it show the colors from my Bambu Studio or OrcaSlicer project?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. Bambu Studio and OrcaSlicer store the filament palette and each object's filament slot in their own files inside the .3mf, separately from the model data. Preview3MF reads those, so a multi-color model previews in the colors you assigned rather than a flat gray. Files using the standard 3MF Materials & Properties extension work too. One limit: color painted onto part of a single mesh with the paint brush is not read yet — colors assigned per object are." }
+      },
       {
         "@type": "Question",
         "name": "How do I preview a .3mf file on Mac?",
@@ -214,7 +219,7 @@
     <div class="wrap">
       <div class="badge">macOS Quick Look extension</div>
       <h1>Preview <code style="font-size:.8em">.3mf</code> files instantly on Mac</h1>
-      <p class="tagline">A <strong>3MF viewer for Mac</strong> built into Quick Look. Press <strong>Space</strong> to open a <code>.3mf</code> file on Mac and see a 3D preview of the model — no slicer needed.</p>
+      <p class="tagline">A <strong>3MF viewer for Mac</strong> built into Quick Look. Press <strong>Space</strong> to open a <code>.3mf</code> file on Mac and see a 3D preview of the model — in your actual <strong>filament colors</strong> for Bambu Studio and OrcaSlicer projects. No slicer needed.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/cavoco/Preview3MF/releases/latest">↓ Download for macOS</a>
         <a class="btn btn-secondary" href="https://github.com/cavoco/Preview3MF">View on GitHub</a>
@@ -233,16 +238,17 @@
   <section>
     <div class="wrap">
       <h2>Everything you need to peek inside a print</h2>
-      <p class="section-sub">A proper 3D preview right in Finder and Quick Look, plus a <strong>3MF thumbnail</strong> in Finder on every icon.</p>
+      <p class="section-sub">A proper 3D preview right in Finder and Quick Look — one that understands slicer projects, not just raw meshes — plus a <strong>3MF thumbnail</strong> in Finder on every icon.</p>
       <div class="features">
         <div class="feature"><div class="ico">🔎</div><h3>Quick Look integration</h3><p>Press Space in Finder — the model appears, no app to open.</p></div>
         <div class="feature"><div class="ico">🧊</div><h3>Real 3D rendering</h3><p>SceneKit with proper lighting, shading, and materials.</p></div>
         <div class="feature"><div class="ico">🌀</div><h3>Auto-rotating</h3><p>Spins around the vertical axis so you see every side.</p></div>
         <div class="feature"><div class="ico">🖱️</div><h3>Interactive controls</h3><p>Orbit and zoom with your mouse or trackpad in the preview.</p></div>
-        <div class="feature"><div class="ico">🎨</div><h3>Color support</h3><p>Renders per-object and per-triangle material colors when present.</p></div>
+        <div class="feature"><div class="ico">🎨</div><h3>Your filament colors</h3><p>Reads the palette out of Bambu Studio and OrcaSlicer projects, so a multi-color model looks like the print — not a gray blob. Standard 3MF color groups too.</p></div>
         <div class="feature"><div class="ico">📐</div><h3>Model info overlay</h3><p>Triangle count, object count, and dimensions parsed from the file.</p></div>
         <div class="feature"><div class="ico">🖼️</div><h3>Finder thumbnails</h3><p>Rendered icons for <code>.3mf</code> files, reusing the slicer's embedded preview when available.</p></div>
         <div class="feature"><div class="ico">🧩</div><h3>Multi-object &amp; assemblies</h3><p>Handles Bambu Studio, PrusaSlicer, and component assemblies.</p></div>
+        <div class="feature"><div class="ico">🗂️</div><h3>Plate by plate</h3><p>A three-plate project shows one plate at a time, named as you named it — not every plate scattered across the bed at once.</p></div>
         <div class="feature"><div class="ico">🌗</div><h3>Dark mode</h3><p>Preview and app adapt to your system appearance.</p></div>
         <div class="feature"><div class="ico">⬆️</div><h3>Automatic updates</h3><p>New versions arrive on their own, signature-verified before installing.</p></div>
       </div>
@@ -274,6 +280,7 @@
         <p><strong>A modern QuickLook plugin.</strong> Preview3MF ships as a Quick Look <em>app extension</em> — the kind macOS 13 and later use — rather than a legacy <code>.qlgenerator</code> bundle. That's why you install it by launching the app once instead of dropping a file into a <code>Library/QuickLook</code> folder.</p>
         <p><strong>Extract &amp; parse.</strong> Preview3MF pulls the <code>.model</code> files from the archive and reads the vertices, triangles, build items, materials, and metadata.</p>
         <p><strong>Resolve assemblies.</strong> Component references are expanded so assembly objects become their part meshes with composed transforms.</p>
+        <p><strong>Read the slicer's own metadata.</strong> Bambu Studio and OrcaSlicer keep the filament palette, the plate layout, and which parts are boolean cutting tools in files of their own alongside the model. Preview3MF reads those, so objects arrive in the right color, one plate at a time, without the negative parts that were never meant to be printed.</p>
         <p><strong>Render.</strong> It builds SceneKit geometry with per-face normals for flat shading, a build-plate grid, three-point lighting, and an auto-framed camera.</p>
         <p><strong>Thumbnails.</strong> Slicers usually bake a rendered PNG into the package — the thumbnail extension reuses that as a fast path and only falls back to SceneKit when none is present.</p>
       </div>
@@ -285,6 +292,13 @@
       <h2>Frequently asked questions</h2>
       <p class="section-sub">Everything about previewing and opening <code>.3mf</code> files on a Mac.</p>
       <div class="faq">
+        <details>
+          <summary>Does it show the colors from my Bambu Studio or OrcaSlicer project?</summary>
+          <div class="answer">
+            <p>Yes. Bambu Studio and OrcaSlicer store the filament palette and each object's filament slot in their own files inside the <code>.3mf</code>, separately from the model data. Preview3MF reads those, so a multi-color model previews in the colors you assigned rather than a flat gray. Files using the standard 3MF Materials &amp; Properties extension work too.</p>
+            <p>One limit: color painted onto part of a single mesh with the paint brush isn't read yet — colors assigned per object are.</p>
+          </div>
+        </details>
         <details>
           <summary>How do I preview a .3mf file on Mac?</summary>
           <div class="answer">
