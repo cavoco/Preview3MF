@@ -150,8 +150,17 @@ jobs:
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         run: |
+          # Lead with the same user-facing commit subjects the update dialog shows;
+          # --generate-notes appends the Full Changelog link after them.
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$PREVIOUS_TAG" ]; then
+            NOTES=$(./scripts/release_notes.sh "$PREVIOUS_TAG" "$TAG" | sed 's/^/- /')
+          else
+            NOTES=""
+          fi
           gh release create "$TAG" "Preview3MF-${TAG}-universal.zip" \
             --title "$TAG" \
+            --notes "$NOTES" \
             --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
