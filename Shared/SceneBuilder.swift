@@ -8,6 +8,15 @@ final class SceneBuilder {
         case dark
     }
 
+    static let turntableNodeName = "turntable"
+
+    /// Stops or restarts the auto-rotation. Pausing the turntable node rather than the whole
+    /// scene freezes it at its current angle and leaves everything else (the camera
+    /// controller's inertia, the first-frame settle that pauses the scene) independent.
+    static func setSpinning(_ spinning: Bool, in scene: SCNScene) {
+        scene.rootNode.childNode(withName: turntableNodeName, recursively: false)?.isPaused = !spinning
+    }
+
     static func buildScene(from items: [BuildItem], appearance: Appearance = .light, showBuildPlate: Bool = true) -> SCNScene {
         let scene = SCNScene()
 
@@ -40,6 +49,7 @@ final class SceneBuilder {
 
         // Pivot node sits at origin so rotation spins the model around its center
         let pivotNode = SCNNode()
+        pivotNode.name = turntableNodeName
         pivotNode.addChildNode(containerNode)
         scene.rootNode.addChildNode(pivotNode)
 

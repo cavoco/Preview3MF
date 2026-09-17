@@ -96,6 +96,21 @@ final class SceneBuilderTests: XCTestCase {
         XCTAssertEqual(cameraNodes.count, 1, "Scene should have exactly one camera")
     }
 
+    func testSetSpinningPausesOnlyTheTurntable() throws {
+        let scene = SceneBuilder.buildScene(from: makeCubeItems())
+        let turntable = try XCTUnwrap(
+            scene.rootNode.childNode(withName: SceneBuilder.turntableNodeName, recursively: false))
+        XCTAssertTrue(turntable.hasActions)
+        XCTAssertFalse(turntable.isPaused, "Should spin by default")
+
+        SceneBuilder.setSpinning(false, in: scene)
+        XCTAssertTrue(turntable.isPaused)
+        XCTAssertFalse(scene.isPaused, "Pausing the spin must not pause the whole scene")
+
+        SceneBuilder.setSpinning(true, in: scene)
+        XCTAssertFalse(turntable.isPaused)
+    }
+
     func testLightingSetup() {
         let scene = SceneBuilder.buildScene(from: makeTriangleItems())
         let lightNodes = scene.rootNode.childNodes.filter { $0.light != nil }

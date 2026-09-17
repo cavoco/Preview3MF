@@ -8,7 +8,11 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private var infoLabel: NSTextField!
     private var plateControl: NSStackView!
     private var plateLabel: NSTextField!
+    private var viewControl: NSStackView!
+    private var spinButton: NSButton!
     private var result: ParseResult?
+    /// Survives paging, which swaps in a freshly built (spinning) scene.
+    private var isSpinning = true
 
     override var nibName: NSNib.Name? { nil }
 
@@ -37,24 +41,27 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         plateLabel.alignment = .center
 
         plateControl = NSStackView(views: [
-            plateButton("chevron.left", "Previous plate", #selector(previousPlate)),
+            overlayButton("chevron.left", "Previous plate", #selector(previousPlate)),
             plateLabel,
-            plateButton("chevron.right", "Next plate", #selector(nextPlate)),
+            overlayButton("chevron.right", "Next plate", #selector(nextPlate)),
         ])
-        plateControl.orientation = .horizontal
-        plateControl.spacing = 6
-        plateControl.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
-        plateControl.wantsLayer = true
-        plateControl.layer?.cornerRadius = 6
+        styleOverlay(plateControl)
         plateControl.isHidden = true
-        plateControl.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(plateControl)
+
+        // Top-left, mirroring the plate control.
+        spinButton = overlayButton("pause.fill", "Pause rotation", #selector(toggleSpin))
+        viewControl = NSStackView(views: [spinButton])
+        styleOverlay(viewControl)
+        view.addSubview(viewControl)
 
         NSLayoutConstraint.activate([
             infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
             infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
             plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            viewControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            viewControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
         ])
 
         sceneView.onHorizontalArrow = { [weak self] delta in self?.stepPlate(delta) }
@@ -62,13 +69,35 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         self.view = view
     }
 
-    private func plateButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
+    private func styleOverlay(_ stack: NSStackView) {
+        stack.orientation = .horizontal
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+        stack.wantsLayer = true
+        stack.layer?.cornerRadius = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    private func overlayButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         let button = FirstMouseButton(image: image ?? NSImage(), target: self, action: action)
         button.isBordered = false
         button.bezelStyle = .inline
         button.setAccessibilityLabel(label)
+        button.toolTip = label
         return button
+    }
+
+    @objc private func toggleSpin() {
+        isSpinning.toggle()
+        if let scene = sceneView.scene {
+            SceneBuilder.setSpinning(isSpinning, in: scene)
+        }
+        let label = isSpinning ? "Pause rotation" : "Resume rotation"
+        spinButton.image = NSImage(systemSymbolName: isSpinning ? "pause.fill" : "play.fill",
+                                   accessibilityDescription: label)
+        spinButton.setAccessibilityLabel(label)
+        spinButton.toolTip = label
     }
 
     @objc private func previousPlate() { stepPlate(-1) }
@@ -115,8 +144,10 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         infoLabel.stringValue = buildInfoString(result)
         infoLabel.textColor = foreground
         plateLabel.textColor = foreground
-        plateControl.layer?.backgroundColor = NSColor(white: appearance == .dark ? 0 : 1,
-                                                      alpha: 0.5).cgColor
+        let overlayBackground = NSColor(white: appearance == .dark ? 0 : 1, alpha: 0.5).cgColor
+        plateControl.layer?.backgroundColor = overlayBackground
+        viewControl.layer?.backgroundColor = overlayBackground
+        spinButton.contentTintColor = foreground
 
         // Only worth showing when there is somewhere to page to.
         let populated = result.plates.filter { !$0.items.isEmpty }.count
@@ -126,6 +157,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         let rebuild = { [weak self] in
             guard let self else { return }
             let scene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
+            SceneBuilder.setSpinning(self.isSpinning, in: scene)
             self.sceneView.scene = scene
             if animated {
                 // Hold the spin still briefly so the first-frame geometry upload doesn't

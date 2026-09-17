@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var scene: SCNScene?
     @State private var parseResult: ParseResult?
     @State private var errorMessage: String?
+    @State private var isSpinning = true
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -55,9 +56,13 @@ struct ContentView: View {
             Divider()
 
             if let scene = scene {
-                ZoomableSceneView(scene: scene, onHorizontalArrow: stepPlate)
+                ZoomableSceneView(scene: scene, isSpinning: isSpinning, onHorizontalArrow: stepPlate)
                     .frame(minHeight: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .topLeading) {
+                        ViewControls(isSpinning: $isSpinning)
+                            .padding(10)
+                    }
                     .overlay(alignment: .topTrailing) {
                         if let result = parseResult, populatedPlateCount(result) > 1 {
                             PlateSwitcher(result: result, step: stepPlate)
@@ -193,6 +198,25 @@ struct ModelInfoView: View {
     }
 }
 
+/// Pause/resume for the auto-rotation, top-left of the scene.
+struct ViewControls: View {
+    @Binding var isSpinning: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { isSpinning.toggle() } label: {
+                Image(systemName: isSpinning ? "pause.fill" : "play.fill")
+            }
+            .help(isSpinning ? "Pause rotation" : "Resume rotation")
+            .accessibilityLabel(isSpinning ? "Pause rotation" : "Resume rotation")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: Capsule())
+    }
+}
+
 /// Pages between the build plates of a multi-plate slicer project.
 struct PlateSwitcher: View {
     let result: ParseResult
@@ -243,6 +267,7 @@ struct StatItem: View {
 /// `ZoomableSCNView` to intercept the scroll wheel.
 struct ZoomableSceneView: NSViewRepresentable {
     let scene: SCNScene
+    var isSpinning = true
     var onHorizontalArrow: ((Int) -> Void)?
 
     func makeNSView(context: Context) -> ZoomableSCNView {
@@ -254,6 +279,7 @@ struct ZoomableSceneView: NSViewRepresentable {
         view.backgroundColor = .clear
         view.isPlaying = true   // keep rendering so the model keeps auto-rotating
         view.scene = scene
+        SceneBuilder.setSpinning(isSpinning, in: scene)
         return view
     }
 
@@ -262,6 +288,7 @@ struct ZoomableSceneView: NSViewRepresentable {
         if nsView.scene !== scene {
             nsView.scene = scene
         }
+        SceneBuilder.setSpinning(isSpinning, in: scene)
     }
 }
 
