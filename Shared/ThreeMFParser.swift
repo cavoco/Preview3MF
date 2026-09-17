@@ -40,6 +40,8 @@ struct ParseResult {
     var plates: [PlateContents] = []
     /// Index into `plates` that `items` came from.
     var plateIndex: Int?
+    /// The slicer print profile, for Bambu Studio / OrcaSlicer projects.
+    var printSettings: PrintSettings?
 
     var plateCount: Int { plates.count }
 
@@ -270,7 +272,8 @@ final class ThreeMFParser {
             items: shownPlate.map { plates[$0].items } ?? result,
             metadata: metadata,
             plates: plates,
-            plateIndex: shownPlate
+            plateIndex: shownPlate,
+            printSettings: project.printSettings.isEmpty ? nil : project.printSettings
         )
     }
 

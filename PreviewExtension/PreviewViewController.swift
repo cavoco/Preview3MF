@@ -205,10 +205,15 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             stats.append("\(formatDim(dims.x)) x \(formatDim(dims.y)) x \(formatDim(dims.z)) mm")
         }
 
-        if parts.isEmpty {
-            return stats.joined(separator: "  ·  ")
+        var line = stats.joined(separator: "  ·  ")
+        if !parts.isEmpty {
+            line = parts.joined(separator: " ") + "  ·  " + line
         }
-        return parts.joined(separator: " ") + "  ·  " + stats.joined(separator: "  ·  ")
+        // The print profile gets a line of its own; it is a different kind of fact.
+        if let settings = result.printSettings?.summary, !settings.isEmpty {
+            line += "\n" + settings.joined(separator: "  ·  ")
+        }
+        return line
     }
 
     private func formatNumber(_ n: Int) -> String {

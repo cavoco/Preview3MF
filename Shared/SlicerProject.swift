@@ -20,6 +20,8 @@ struct SlicerProject {
     var negativeParts: Set<Int> = []
     /// Build plates in file order.
     var plates: [Plate] = []
+    /// The print profile the project was saved with.
+    var printSettings = PrintSettings()
 
     /// One build plate: the objects placed on it, plus the name the user gave it in the
     /// slicer ("Coin Lid"), which is blank far more often than not.
@@ -44,6 +46,7 @@ struct SlicerProject {
         var project = SlicerProject()
         if let data = entryData(archive, "Metadata/project_settings.config") {
             project.filamentColors = filamentColors(fromProjectSettings: data)
+            project.printSettings = PrintSettings(projectSettings: data)
         }
         if let data = entryData(archive, "Metadata/model_settings.config") {
             let delegate = ModelSettingsDelegate()
@@ -54,6 +57,15 @@ struct SlicerProject {
                 project.negativeParts = delegate.negativeParts
                 project.plates = delegate.plates
             }
+        }
+        // The palette lists every loaded filament slot, not just the ones this model prints
+        // with. Narrow the types to slots an object actually uses, when that is known.
+        let usedSlots = Set(project.objectExtruder.values)
+        if !usedSlots.isEmpty, project.printSettings.filamentTypes.count > 1 {
+            let types = project.printSettings.filamentTypes.enumerated()
+                .filter { usedSlots.contains($0.offset + 1) }
+                .map(\.element)
+            if !types.isEmpty { project.printSettings.filamentTypes = types }
         }
         return project
     }
@@ -78,6 +90,55 @@ struct SlicerProject {
         }
         // A slot we cannot parse still has to occupy its index, or every later slot shifts.
         return raw.map { ModelXMLDelegate.parseDisplayColor($0) ?? SIMD4<Float>(0.75, 0.75, 0.75, 1.0) }
+    }
+}
+
+/// The handful of print-profile values worth a glance before opening the slicer, read from
+/// `project_settings.config`. Bambu Studio and OrcaSlicer share these keys. Values arrive as
+/// strings, or as one-per-extruder arrays of strings.
+struct PrintSettings: Equatable {
+    var printer: String?
+    var nozzleDiameter: String?
+    var layerHeight: String?
+    /// One entry per filament slot, e.g. `["PLA", "PETG"]`.
+    var filamentTypes: [String] = []
+    var infillDensity: String?
+    var supportsEnabled = false
+
+    init() {}
+
+    init(projectSettings data: Data) {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+        func first(_ key: String) -> String? {
+            let value = (object[key] as? String) ?? (object[key] as? [String])?.first
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+        printer = first("printer_model")
+        nozzleDiameter = first("nozzle_diameter")
+        layerHeight = first("layer_height")
+        filamentTypes = ((object["filament_type"] as? [String]) ?? []).filter { !$0.isEmpty }
+        infillDensity = first("sparse_infill_density")
+        supportsEnabled = first("enable_support") == "1"
+    }
+
+    var isEmpty: Bool { summary.isEmpty }
+
+    /// Short phrases in reading order: "Bambu Lab P1S", "0.4 mm nozzle", "0.16 mm layers",
+    /// "PLA, PETG", "15% infill", "Supports".
+    var summary: [String] {
+        var parts: [String] = []
+        if let printer { parts.append(printer) }
+        if let nozzleDiameter { parts.append("\(nozzleDiameter) mm nozzle") }
+        if let layerHeight { parts.append("\(layerHeight) mm layers") }
+        var seen = Set<String>()
+        let types = filamentTypes.filter { seen.insert($0).inserted }
+        if !types.isEmpty { parts.append(types.joined(separator: ", ")) }
+        if let infillDensity { parts.append("\(infillDensity) infill") }
+        if supportsEnabled { parts.append("Supports") }
+        return parts
     }
 }
 

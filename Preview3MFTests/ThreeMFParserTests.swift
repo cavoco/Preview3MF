@@ -764,6 +764,7 @@ final class ThreeMFParserTests: XCTestCase {
         negativeParts: [Int] = [],
         plates: [[Int]],
         plateNames: [String?] = [],
+        projectSettings: [String: Any] = [:],
         includeMetadata: Bool = true
     ) -> Data {
         var model = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -790,9 +791,10 @@ final class ThreeMFParserTests: XCTestCase {
         var entries: [MiniZIP.Entry] = [.init(path: "3D/3dmodel.model", data: Data(model.utf8))]
 
         if includeMetadata {
-            let palette = filamentColours.map { "\"\($0)\"" }.joined(separator: ", ")
-            let settings = "{\"filament_colour\": [\(palette)], \"filament_type\": [\"PLA\"]}"
-            entries.append(.init(path: "Metadata/project_settings.config", data: Data(settings.utf8)))
+            var settings: [String: Any] = ["filament_colour": filamentColours, "filament_type": ["PLA"]]
+            settings.merge(projectSettings) { _, new in new }
+            let settingsData = try! JSONSerialization.data(withJSONObject: settings)
+            entries.append(.init(path: "Metadata/project_settings.config", data: settingsData))
 
             var config = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config>"
             for object in objects {
@@ -892,6 +894,52 @@ final class ThreeMFParserTests: XCTestCase {
         ))
         XCTAssertEqual(result.plateIndex, 1)
         XCTAssertEqual(result.items.count, 1)
+    }
+
+    func testPrintSettingsAreReadFromProjectSettings() throws {
+        // Shaped like a real Bambu Studio file: most values are strings, nozzle is per-extruder.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            plates: [[2]],
+            projectSettings: [
+                "printer_model": "Bambu Lab P1S",
+                "nozzle_diameter": ["0.4"],
+                "layer_height": "0.16",
+                "filament_type": ["PLA", "PETG"],
+                "sparse_infill_density": "15%",
+                "enable_support": "1",
+            ]
+        ))
+        let settings = try XCTUnwrap(result.printSettings)
+        XCTAssertEqual(settings.summary, [
+            "Bambu Lab P1S", "0.4 mm nozzle", "0.16 mm layers", "PLA", "15% infill", "Supports",
+        ], "PETG is loaded in slot 2 but nothing prints with it, so it should not be listed")
+    }
+
+    func testPrintSettingsListEachUsedFilamentTypeOnce() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF", "#00FF00"],
+            objects: [(id: 2, extruder: 1, components: [10]),
+                      (id: 3, extruder: 2, components: [11]),
+                      (id: 4, extruder: 3, components: [12])],
+            meshes: [10, 11, 12],
+            plates: [[2, 3, 4]],
+            projectSettings: ["filament_type": ["PLA", "PETG", "PLA"], "enable_support": "0"]
+        ))
+        XCTAssertEqual(result.printSettings?.summary, ["PLA, PETG"])
+    }
+
+    func testNoPrintSettingsWithoutSlicerMetadata() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: [],
+            objects: [(id: 2, extruder: nil, components: [10])],
+            meshes: [10],
+            plates: [[2]],
+            includeMetadata: false
+        ))
+        XCTAssertNil(result.printSettings)
     }
 
     func testModelXMLColoursOutrankSlicerMetadata() throws {

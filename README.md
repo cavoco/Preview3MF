@@ -15,9 +15,12 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 - **3D rendering** with SceneKit — proper lighting, shading, and materials
 - **Build-plate grid** — a reference grid under the model, scaled to its footprint, turning
   with the model like a turntable
-- **Auto-rotating model** — spins around the vertical axis so you can see all sides
+- **Auto-rotating model** — spins around the vertical axis so you can see all sides, with a
+  pause/resume button to freeze it at any angle
 - **Interactive controls** — orbit and zoom with your mouse/trackpad in the preview
-- **Model info overlay** — triangle count, object count, and dimensions parsed from the file
+- **Model info overlay** — triangle count, object count, and dimensions parsed from the file,
+  plus the print profile for Bambu Studio / OrcaSlicer projects (printer, nozzle, layer
+  height, filament, infill, supports)
 - **Color support** — renders per-object/per-triangle colors from both `<basematerials>`
   and the 3MF Materials & Properties extension (`<m:colorgroup>`), with or without a
   namespace prefix
