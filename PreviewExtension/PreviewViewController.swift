@@ -32,6 +32,11 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         infoLabel.drawsBackground = true
         infoLabel.isBezeled = false
         infoLabel.isEditable = false
+        // Wrap rather than run off the edge: the Quick Look panel opens narrow, and the
+        // print-profile line would otherwise only show once the panel is widened.
+        infoLabel.maximumNumberOfLines = 0
+        infoLabel.lineBreakMode = .byWordWrapping
+        infoLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(infoLabel)
 
@@ -58,6 +63,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         NSLayoutConstraint.activate([
             infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
             infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
+            infoLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -8),
             plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
             viewControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
@@ -67,6 +73,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         sceneView.onHorizontalArrow = { [weak self] delta in self?.stepPlate(delta) }
 
         self.view = view
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // A wrapping label needs to know its width up front to report the right height.
+        infoLabel.preferredMaxLayoutWidth = view.bounds.width - 16
     }
 
     private func styleOverlay(_ stack: NSStackView) {
