@@ -13,7 +13,8 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 
 - **Quick Look integration** — press Space in Finder to preview `.3mf` files
 - **3D rendering** with SceneKit — proper lighting, shading, and materials
-- **Build-plate grid** — a world-fixed reference grid under the model, scaled to its footprint
+- **Build-plate grid** — a reference grid under the model, scaled to its footprint, turning
+  with the model like a turntable
 - **Auto-rotating model** — spins around the vertical axis so you can see all sides
 - **Interactive controls** — orbit and zoom with your mouse/trackpad in the preview
 - **Model info overlay** — triangle count, object count, and dimensions parsed from the file

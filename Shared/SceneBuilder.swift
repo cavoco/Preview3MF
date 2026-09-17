@@ -56,7 +56,9 @@ final class SceneBuilder {
         )
         let maxExtent = max(extents.x, extents.y, extents.z)
 
-        // Build-plate grid — world-fixed (does not rotate with the model).
+        // Build-plate grid — a child of the pivot, so it turns with the model and the
+        // whole thing reads as one object on a turntable rather than the model sliding
+        // over a fixed floor. Centred on the pivot, so it spins in place.
         // Skipped for thumbnails, where the grid would just be noise at icon size.
         var gridSize: Float = 0
         if showBuildPlate {
@@ -64,7 +66,7 @@ final class SceneBuilder {
             gridSize = max(ceil(footprintMax * 1.5 / 50) * 50, 100)
             let gridNode = buildBuildPlate(size: gridSize, appearance: appearance)
             gridNode.position = SCNVector3(0, -extents.y / 2, 0)
-            scene.rootNode.addChildNode(gridNode)
+            pivotNode.addChildNode(gridNode)
         }
 
         // Camera (frame the larger of model or plate)

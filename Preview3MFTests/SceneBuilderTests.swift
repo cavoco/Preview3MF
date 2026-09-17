@@ -343,12 +343,20 @@ final class SceneBuilderTests: XCTestCase {
 
     // MARK: - Build Plate Tests
 
-    /// The plate is the only root-level node built from line geometry.
+    /// The plate is the only node built from line geometry. It hangs off the spinning
+    /// pivot rather than the root, so search the whole tree for it.
     private func findBuildPlateNode(in scene: SCNScene) -> SCNNode? {
-        scene.rootNode.childNodes.first { node in
-            node.camera == nil && node.light == nil &&
-            node.childNodes.contains { $0.geometry?.elements.first?.primitiveType == .line }
+        func search(_ node: SCNNode) -> SCNNode? {
+            if node.camera == nil, node.light == nil,
+               node.childNodes.contains(where: { $0.geometry?.elements.first?.primitiveType == .line }) {
+                return node
+            }
+            for child in node.childNodes {
+                if let found = search(child) { return found }
+            }
+            return nil
         }
+        return search(scene.rootNode)
     }
 
     func testBuildPlateExistsByDefault() {
@@ -372,11 +380,15 @@ final class SceneBuilderTests: XCTestCase {
         XCTAssertEqual(lineNodes.count, 2, "Plate should have separate minor and major line nodes")
     }
 
-    func testBuildPlateIsWorldFixed() throws {
-        // The model pivot spins; the plate must not, so the grid stays put under it.
+    func testBuildPlateTurnsWithModel() throws {
+        // The plate hangs off the spinning pivot, so model and grid turn together like a
+        // turntable. It inherits the spin rather than running a second action of its own,
+        // which would be free to drift out of phase.
         let scene = SceneBuilder.buildScene(from: makeCubeItems())
         let plate = try XCTUnwrap(findBuildPlateNode(in: scene))
-        XCTAssertFalse(plate.hasActions, "Build plate should not carry a rotation action")
+        XCTAssertFalse(plate.hasActions, "Plate should inherit the pivot's spin, not run its own")
+        let pivot = try XCTUnwrap(plate.parent, "Plate should have a parent pivot")
+        XCTAssertTrue(pivot.hasActions, "Plate's parent pivot should carry the rotation action")
     }
 
     func testBuildPlateSitsAtModelBase() throws {
