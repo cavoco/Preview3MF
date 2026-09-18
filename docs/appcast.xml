@@ -6,6 +6,15 @@
         <description>Updates for Preview3MF, a Quick Look extension for .3mf files.</description>
         <language>en</language>
         <item>
+            <title>1.0.23</title>
+            <pubDate>Fri, 18 Sep 2026 10:28:12 +0000</pubDate>
+            <sparkle:version>24</sparkle:version>
+            <sparkle:shortVersionString>1.0.23</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul><li>Wrap the Quick Look info overlay so the print profile fits a narrow panel</li><li>Show the slicer print profile in the info overlay</li><li>Add a pause/resume control for the auto-rotation</li><li>Turn the build plate with the model like a turntable</li></ul>]]></description>
+            <enclosure url="https://github.com/cavoco/Preview3MF/releases/download/v1.0.23/Preview3MF-v1.0.23-universal.zip" sparkle:edSignature="gYSoSIKV1vl5SiEyIJ1qQSACI5qtSZtt9ioxdPvaWWyRCJdLR5Nxip+Hh9dfVZxs/3gWd8OVLWrvHofZ224EAg==" length="4558031" type="application/octet-stream"/>
+        </item>
+        <item>
             <title>1.0.22</title>
             <pubDate>Wed, 09 Sep 2026 16:15:31 +0000</pubDate>
             <sparkle:version>23</sparkle:version>
