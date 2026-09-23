@@ -168,7 +168,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         let rebuild = { [weak self] in
             guard let self else { return }
-            let scene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
+            let scene = SceneBuilder.buildScene(from: result.items, appearance: appearance,
+                                                bedSize: result.printSettings?.bedSize)
             SceneBuilder.setSpinning(self.isSpinning, in: scene)
             self.sceneView.scene = scene
             if animated {

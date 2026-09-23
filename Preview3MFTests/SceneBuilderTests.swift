@@ -406,6 +406,64 @@ final class SceneBuilderTests: XCTestCase {
         XCTAssertTrue(pivot.hasActions, "Plate's parent pivot should carry the rotation action")
     }
 
+    /// Widest span of the plate's line geometry along each axis.
+    private func plateSpan(of plate: SCNNode) -> (width: Float, depth: Float) {
+        var width: Float = 0
+        var depth: Float = 0
+        for child in plate.childNodes {
+            let (lo, hi) = child.boundingBox
+            width = max(width, Float(hi.x - lo.x))
+            depth = max(depth, Float(hi.z - lo.z))
+        }
+        return (width, depth)
+    }
+
+    func testBuildPlateMatchesPrinterBedSize() throws {
+        // The slicer told us the bed is 256 x 256, so the plate is that — not a grid sized
+        // to the 1 mm cube sitting on it.
+        let scene = SceneBuilder.buildScene(from: makeCubeItems(), bedSize: SIMD2<Float>(256, 256))
+        let plate = try XCTUnwrap(findBuildPlateNode(in: scene))
+        let span = plateSpan(of: plate)
+        XCTAssertEqual(span.width, 256, accuracy: 0.01)
+        XCTAssertEqual(span.depth, 256, accuracy: 0.01)
+    }
+
+    func testBuildPlateIsRectangularForNonSquareBed() throws {
+        // A Prusa MK4's 250 x 210 bed must not be squared off.
+        let scene = SceneBuilder.buildScene(from: makeCubeItems(), bedSize: SIMD2<Float>(250, 210))
+        let plate = try XCTUnwrap(findBuildPlateNode(in: scene))
+        let span = plateSpan(of: plate)
+        XCTAssertEqual(span.width, 250, accuracy: 0.01)
+        XCTAssertEqual(span.depth, 210, accuracy: 0.01)
+    }
+
+    func testBuildPlateFallsBackToModelSizedGridWithoutBedSize() throws {
+        // Plain 3MF with no slicer profile: keep the old behaviour rather than guessing a bed.
+        let scene = SceneBuilder.buildScene(from: makeCubeItems())
+        let plate = try XCTUnwrap(findBuildPlateNode(in: scene))
+        let span = plateSpan(of: plate)
+        XCTAssertEqual(span.width, 100, accuracy: 0.01)
+        XCTAssertEqual(span.depth, 100, accuracy: 0.01)
+    }
+
+    func testBuildPlateIgnoresDegenerateBedSize() throws {
+        let scene = SceneBuilder.buildScene(from: makeCubeItems(), bedSize: SIMD2<Float>(0, 256))
+        let plate = try XCTUnwrap(findBuildPlateNode(in: scene))
+        XCTAssertEqual(plateSpan(of: plate).width, 100, accuracy: 0.01,
+                       "A zero-width bed should fall back, not collapse the plate")
+    }
+
+    func testSmallModelOnLargeBedStaysFramed() throws {
+        // Framing the whole 256 mm bed would leave the 1 mm cube an invisible speck, so the
+        // camera stays on the model and lets the bed run off the edges of the view.
+        let onBed = SceneBuilder.buildScene(from: makeCubeItems(), bedSize: SIMD2<Float>(256, 256))
+        let bare = SceneBuilder.buildScene(from: makeCubeItems(), showBuildPlate: false)
+        let onBedCamera = try XCTUnwrap(onBed.rootNode.childNodes.first { $0.camera != nil })
+        let bareCamera = try XCTUnwrap(bare.rootNode.childNodes.first { $0.camera != nil })
+        XCTAssertLessThanOrEqual(onBedCamera.position.z, bareCamera.position.z * 1.5 + 0.01,
+                                 "The bed may pull the camera back a little, but not to bed scale")
+    }
+
     func testBuildPlateSitsAtModelBase() throws {
         // The unit cube spans y in [0, 1]; centered at the origin its base is at y = -0.5.
         let scene = SceneBuilder.buildScene(from: makeCubeItems())
