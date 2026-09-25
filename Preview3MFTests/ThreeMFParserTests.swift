@@ -931,6 +931,66 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(result.printSettings?.summary, ["PLA, PETG"])
     }
 
+    func testPrintSettingsReadBedSizeFromPrintableArea() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: [],
+            objects: [(id: 2, extruder: nil, components: [10])],
+            meshes: [10],
+            plates: [[2]],
+            projectSettings: ["printable_area": ["0x0", "256x0", "256x256", "0x256"]]
+        ))
+        let bed = try XCTUnwrap(result.printSettings?.bedSize)
+        XCTAssertEqual(bed.x, 256, accuracy: 0.01)
+        XCTAssertEqual(bed.y, 256, accuracy: 0.01)
+    }
+
+    func testBedSizeUsesBoundingBoxOfNonRectangularBed() throws {
+        // A delta's printable area is a many-sided polygon approximating a circle; the
+        // bounding box is what the plate needs.
+        let octagon = ["50x0", "150x0", "200x50", "200x150",
+                       "150x200", "50x200", "0x150", "0x50"]
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: [],
+            objects: [(id: 2, extruder: nil, components: [10])],
+            meshes: [10],
+            plates: [[2]],
+            projectSettings: ["printable_area": octagon]
+        ))
+        let bed = try XCTUnwrap(result.printSettings?.bedSize)
+        XCTAssertEqual(bed.x, 200, accuracy: 0.01)
+        XCTAssertEqual(bed.y, 200, accuracy: 0.01)
+    }
+
+    func testBedSizeIgnoresUnusablePrintableArea() throws {
+        for area in [["0x0", "256x0"], ["0x0", "0x0", "0x0"], ["0x0", "junk", "256x256"]] {
+            let result = try parseArchive(makeSlicerProjectArchive(
+                filamentColours: [],
+                objects: [(id: 2, extruder: nil, components: [10])],
+                meshes: [10],
+                plates: [[2]],
+                projectSettings: ["printable_area": area]
+            ))
+            XCTAssertNil(result.printSettings?.bedSize,
+                         "Unusable printable_area \(area) should leave the bed size unset")
+        }
+    }
+
+    func testPrintSettingsSurviveWithBedSizeAlone() throws {
+        // Nothing here reaches the overlay, but the bed still has to reach the scene —
+        // settings carrying only a printable area must not be discarded as empty.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: [],
+            objects: [(id: 2, extruder: nil, components: [10])],
+            meshes: [10],
+            plates: [[2]],
+            projectSettings: ["printable_area": ["0x0", "180x0", "180x180", "0x180"],
+                              "filament_type": [String]()]
+        ))
+        let settings = try XCTUnwrap(result.printSettings)
+        XCTAssertTrue(settings.summary.isEmpty)
+        XCTAssertEqual(settings.bedSize?.x, 180)
+    }
+
     func testNoPrintSettingsWithoutSlicerMetadata() throws {
         let result = try parseArchive(makeSlicerProjectArchive(
             filamentColours: [],

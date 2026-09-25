@@ -17,7 +17,12 @@ final class SceneBuilder {
         scene.rootNode.childNode(withName: turntableNodeName, recursively: false)?.isPaused = !spinning
     }
 
-    static func buildScene(from items: [BuildItem], appearance: Appearance = .light, showBuildPlate: Bool = true) -> SCNScene {
+    static func buildScene(
+        from items: [BuildItem],
+        appearance: Appearance = .light,
+        showBuildPlate: Bool = true,
+        bedSize: SIMD2<Float>? = nil
+    ) -> SCNScene {
         let scene = SCNScene()
 
         let isDark = appearance == .dark
@@ -70,11 +75,22 @@ final class SceneBuilder {
         // whole thing reads as one object on a turntable rather than the model sliding
         // over a fixed floor. Centred on the pivot, so it spins in place.
         // Skipped for thumbnails, where the grid would just be noise at icon size.
-        var gridSize: Float = 0
+        var plateWidth: Float = 0
+        var plateDepth: Float = 0
         if showBuildPlate {
-            let footprintMax = max(Float(extents.x), Float(extents.z))
-            gridSize = max(ceil(footprintMax * 1.5 / 50) * 50, 100)
-            let gridNode = buildBuildPlate(size: gridSize, appearance: appearance)
+            // Prefer the printer's real printable area, which the slicer records in the
+            // project: it shows the model at true scale against the bed it was sliced for,
+            // so a keychain on a 256 mm plate reads as small. Files without it (plain 3MF,
+            // no slicer profile) fall back to a generic grid sized to the model itself.
+            if let bedSize, bedSize.x > 0, bedSize.y > 0 {
+                plateWidth = bedSize.x
+                plateDepth = bedSize.y
+            } else {
+                let footprintMax = max(Float(extents.x), Float(extents.z))
+                plateWidth = max(ceil(footprintMax * 1.5 / 50) * 50, 100)
+                plateDepth = plateWidth
+            }
+            let gridNode = buildBuildPlate(width: plateWidth, depth: plateDepth, appearance: appearance)
             gridNode.position = SCNVector3(0, -extents.y / 2, 0)
             pivotNode.addChildNode(gridNode)
         }
@@ -84,7 +100,11 @@ final class SceneBuilder {
         camera.automaticallyAdjustsZRange = true
         let cameraNode = SCNNode()
         cameraNode.camera = camera
-        let viewExtent = max(Float(maxExtent), gridSize * 0.5)
+        // Frame the model, letting the plate pull the camera back only so far. A full bed is
+        // often far bigger than the print, and framing the whole thing would shrink the model
+        // to a speck; past this cap the bed simply runs off the edges of the view.
+        let plateExtent = max(plateWidth, plateDepth) * 0.5
+        let viewExtent = max(Float(maxExtent), min(plateExtent, Float(maxExtent) * 1.5))
         let distance = CGFloat(viewExtent) * 1.8
         cameraNode.position = SCNVector3(
             distance * 0.5,
@@ -130,27 +150,43 @@ final class SceneBuilder {
 
     // MARK: - Build plate
 
-    private static func buildBuildPlate(size: Float, appearance: Appearance) -> SCNNode {
+    private static func buildBuildPlate(width: Float, depth: Float, appearance: Appearance) -> SCNNode {
         let isDark = appearance == .dark
-        let halfSize = size / 2
+        let halfWidth = width / 2
+        let halfDepth = depth / 2
         let minorStep: Float = 10
         let majorEvery = 5  // every 5 minor steps = 50mm
-        let lineCount = Int(size / minorStep)
-        let halfCount = lineCount / 2
 
         var minorVerts: [SCNVector3] = []
         var majorVerts: [SCNVector3] = []
-        for i in -halfCount...halfCount {
-            let coord = Float(i) * minorStep
-            let lineX0 = SCNVector3(coord, 0, -halfSize)
-            let lineX1 = SCNVector3(coord, 0,  halfSize)
-            let lineZ0 = SCNVector3(-halfSize, 0, coord)
-            let lineZ1 = SCNVector3( halfSize, 0, coord)
-            if i % majorEvery == 0 {
-                majorVerts.append(contentsOf: [lineX0, lineX1, lineZ0, lineZ1])
-            } else {
-                minorVerts.append(contentsOf: [lineX0, lineX1, lineZ0, lineZ1])
+
+        // Grid lines step out from the centre, so they stay aligned across the two axes even
+        // when the bed is not square and its half-extent is not a whole number of steps.
+        func addLines(halfExtent: Float, halfSpan: Float, alongZ: Bool) {
+            for i in -Int(halfExtent / minorStep)...Int(halfExtent / minorStep) {
+                let coord = Float(i) * minorStep
+                let ends = alongZ
+                    ? [SCNVector3(coord, 0, -halfSpan), SCNVector3(coord, 0, halfSpan)]
+                    : [SCNVector3(-halfSpan, 0, coord), SCNVector3(halfSpan, 0, coord)]
+                if i % majorEvery == 0 {
+                    majorVerts.append(contentsOf: ends)
+                } else {
+                    minorVerts.append(contentsOf: ends)
+                }
             }
+        }
+        addLines(halfExtent: halfWidth, halfSpan: halfDepth, alongZ: true)
+        addLines(halfExtent: halfDepth, halfSpan: halfWidth, alongZ: false)
+
+        // The bed's real outline. Grid lines land on multiples of 10 mm from the centre and
+        // so stop short of an edge like 256 mm; without this the plate would look undersized.
+        let corners = [
+            SCNVector3(-halfWidth, 0, -halfDepth), SCNVector3( halfWidth, 0, -halfDepth),
+            SCNVector3( halfWidth, 0,  halfDepth), SCNVector3(-halfWidth, 0,  halfDepth),
+        ]
+        for (i, corner) in corners.enumerated() {
+            majorVerts.append(corner)
+            majorVerts.append(corners[(i + 1) % corners.count])
         }
 
         let minorColor = isDark

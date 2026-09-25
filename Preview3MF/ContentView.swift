@@ -125,7 +125,8 @@ struct ContentView: View {
         guard next != index, let updated = current.showingPlate(next) else { return }
         parseResult = updated
         let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
-        scene = SceneBuilder.buildScene(from: updated.items, appearance: appearance)
+        scene = SceneBuilder.buildScene(from: updated.items, appearance: appearance,
+                                        bedSize: updated.printSettings?.bedSize)
     }
 
     private func loadFile(at url: URL) {
@@ -133,7 +134,8 @@ struct ContentView: View {
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
-            let newScene = SceneBuilder.buildScene(from: result.items, appearance: appearance)
+            let newScene = SceneBuilder.buildScene(from: result.items, appearance: appearance,
+                                                   bedSize: result.printSettings?.bedSize)
             // Hold the spin still briefly so the first-frame upload doesn't jump (as in the preview).
             newScene.isPaused = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { newScene.isPaused = false }

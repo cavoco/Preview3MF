@@ -104,6 +104,9 @@ struct PrintSettings: Equatable {
     var filamentTypes: [String] = []
     var infillDensity: String?
     var supportsEnabled = false
+    /// The printable area's width and depth in millimetres, so the scene can draw the bed
+    /// the project was actually sliced for. Not part of `summary` — it is drawn, not read.
+    var bedSize: SIMD2<Float>?
 
     init() {}
 
@@ -122,9 +125,32 @@ struct PrintSettings: Equatable {
         filamentTypes = ((object["filament_type"] as? [String]) ?? []).filter { !$0.isEmpty }
         infillDensity = first("sparse_infill_density")
         supportsEnabled = first("enable_support") == "1"
+        bedSize = Self.bedSize(fromPrintableArea: object["printable_area"] as? [String])
     }
 
-    var isEmpty: Bool { summary.isEmpty }
+    /// `printable_area` is the bed outline as `["0x0", "256x0", "256x256", "0x256"]`.
+    /// Deltas and custom beds list many more points, so take the bounding box rather than
+    /// assuming four corners.
+    private static func bedSize(fromPrintableArea points: [String]?) -> SIMD2<Float>? {
+        guard let points, points.count >= 3 else { return nil }
+        var lower = SIMD2<Float>(repeating: .greatestFiniteMagnitude)
+        var upper = SIMD2<Float>(repeating: -.greatestFiniteMagnitude)
+        for point in points {
+            let parts = point.split(separator: "x")
+            guard parts.count == 2,
+                  let x = Float(parts[0]), let y = Float(parts[1]),
+                  x.isFinite, y.isFinite else { return nil }
+            lower = simd_min(lower, SIMD2(x, y))
+            upper = simd_max(upper, SIMD2(x, y))
+        }
+        let size = upper - lower
+        guard size.x > 0, size.y > 0 else { return nil }
+        return size
+    }
+
+    /// A project that carries only a bed size still has something to render, so it must not
+    /// be discarded as empty even though the overlay has nothing to show.
+    var isEmpty: Bool { summary.isEmpty && bedSize == nil }
 
     /// Short phrases in reading order: "Bambu Lab P1S", "0.4 mm nozzle", "0.16 mm layers",
     /// "PLA, PETG", "15% infill", "Supports".
