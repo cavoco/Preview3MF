@@ -9,6 +9,8 @@
 			<key>QLSupportedContentTypes</key>
 			<array>
 				<string>com.preview3mf.3mf-file</string>
+				<string>com.shapr3d.3d-manufacturing.3mf</string>
+				<string>com.bambulab.3mf</string>
 			</array>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>
