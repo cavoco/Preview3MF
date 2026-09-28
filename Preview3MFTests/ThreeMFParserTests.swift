@@ -765,6 +765,7 @@ final class ThreeMFParserTests: XCTestCase {
         plates: [[Int]],
         plateNames: [String?] = [],
         projectSettings: [String: Any] = [:],
+        sliceInfo: String? = nil,
         includeMetadata: Bool = true
     ) -> Data {
         var model = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -825,6 +826,9 @@ final class ThreeMFParserTests: XCTestCase {
             }
             config += "</config>"
             entries.append(.init(path: "Metadata/model_settings.config", data: Data(config.utf8)))
+        }
+        if let sliceInfo {
+            entries.append(.init(path: "Metadata/slice_info.config", data: Data(sliceInfo.utf8)))
         }
 
         return MiniZIP.createArchive(entries: entries)
@@ -1125,6 +1129,97 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(result.plateCount, 2)
         XCTAssertTrue(result.plates[0].items.isEmpty)
         XCTAssertEqual(result.plateIndex, 1, "should open on the first plate with content")
+    }
+
+    // MARK: - Slice Estimates
+
+    /// `slice_info.config` as Bambu Studio writes it, with one `<plate>` per sliced plate.
+    private func makeSliceInfo(_ plates: [(index: Int, seconds: String, grams: String)]) -> String {
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config><header>"
+        xml += "<header_item key=\"X-BBL-Client-Type\" value=\"slicer\"/></header>"
+        for plate in plates {
+            xml += "<plate><metadata key=\"index\" value=\"\(plate.index)\"/>"
+            xml += "<metadata key=\"nozzle_diameters\" value=\"0.4\"/>"
+            xml += "<metadata key=\"prediction\" value=\"\(plate.seconds)\"/>"
+            xml += "<metadata key=\"weight\" value=\"\(plate.grams)\"/>"
+            xml += "<object identify_id=\"100\" name=\"part\" skipped=\"false\"/>"
+            xml += "<filament id=\"1\" type=\"PLA\" color=\"#FFFFFF\" used_m=\"12.7\" used_g=\"\(plate.grams)\"/>"
+            xml += "</plate>"
+        }
+        return xml + "</config>"
+    }
+
+    func testSliceEstimateFollowsPlatePaging() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10]),
+                      (id: 3, extruder: 1, components: [11])],
+            meshes: [10, 11],
+            plates: [[2], [3]],
+            sliceInfo: makeSliceInfo([(1, "8040", "38.21"), (2, "900", "4.5")])
+        ))
+        XCTAssertEqual(result.sliceEstimate, SliceEstimate(printSeconds: 8040, filamentGrams: 38.21))
+        XCTAssertEqual(result.sliceEstimate?.summary, ["2h 14m", "38.2 g"])
+        let second = try XCTUnwrap(result.showingPlate(1))
+        XCTAssertEqual(second.sliceEstimate?.summary, ["15m", "4.5 g"])
+    }
+
+    func testSliceEstimateMatchesPlateByIndexNotPosition() throws {
+        // Only plate 2 was sliced; its entry is the first and only one in slice_info.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10]),
+                      (id: 3, extruder: 1, components: [11])],
+            meshes: [10, 11],
+            plates: [[2], [3]],
+            sliceInfo: makeSliceInfo([(2, "600", "3")])
+        ))
+        XCTAssertNil(result.sliceEstimate, "plate 1 was never sliced")
+        XCTAssertEqual(result.showingPlate(1)?.sliceEstimate?.printSeconds, 600)
+    }
+
+    func testUnslicedProjectHasNoEstimate() throws {
+        // An unsliced project still carries slice_info.config, holding only a header.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            plates: [[2]],
+            sliceInfo: makeSliceInfo([])
+        ))
+        XCTAssertNil(result.sliceEstimate)
+        XCTAssertNil(result.plates[0].estimate)
+    }
+
+    func testSliceEstimateWithoutPlateAssignments() throws {
+        // No plates in model_settings.config, but a single sliced plate: still worth showing.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            plates: [],
+            sliceInfo: makeSliceInfo([(1, "45", "0.8")])
+        ))
+        XCTAssertEqual(result.sliceEstimate?.summary, ["1m", "0.8 g"])
+    }
+
+    func testSliceEstimateIgnoresZeroAndGarbage() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            plates: [[2]],
+            sliceInfo: makeSliceInfo([(1, "0", "n/a")])
+        ))
+        XCTAssertNil(result.sliceEstimate)
+    }
+
+    func testSliceEstimateFormatting() {
+        XCTAssertEqual(SliceEstimate.formatDuration(20), "<1m")
+        XCTAssertEqual(SliceEstimate.formatDuration(2700), "45m")
+        XCTAssertEqual(SliceEstimate.formatDuration(3600), "1h 0m")
+        XCTAssertEqual(SliceEstimate.formatDuration(94_000), "26h 7m")
+        XCTAssertEqual(SliceEstimate(printSeconds: nil, filamentGrams: 212.4).summary, ["212 g"])
     }
 
     // MARK: - Build Item Transform Tests

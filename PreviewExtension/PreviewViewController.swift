@@ -222,9 +222,11 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         if !parts.isEmpty {
             line = parts.joined(separator: " ") + "  ·  " + line
         }
-        // The print profile gets a line of its own; it is a different kind of fact.
-        if let settings = result.printSettings?.summary, !settings.isEmpty {
-            line += "\n" + settings.joined(separator: "  ·  ")
+        // The print profile gets a line of its own; it is a different kind of fact. The
+        // slicer's estimate leads it, since time and filament are what people look for.
+        let printLine = (result.sliceEstimate?.summary ?? []) + (result.printSettings?.summary ?? [])
+        if !printLine.isEmpty {
+            line += "\n" + printLine.joined(separator: "  ·  ")
         }
         return line
     }

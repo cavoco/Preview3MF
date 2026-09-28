@@ -167,6 +167,9 @@ struct ModelInfoView: View {
             if let settings = result.printSettings?.summary, !settings.isEmpty {
                 LabeledContent("Print", value: settings.joined(separator: " · "))
             }
+            if let estimate = result.sliceEstimate?.summary, !estimate.isEmpty {
+                LabeledContent("Estimate", value: estimate.joined(separator: " · "))
+            }
 
             Divider()
 

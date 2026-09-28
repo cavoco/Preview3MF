@@ -28,6 +28,8 @@ struct PlateContents {
     /// The name given in the slicer, when the user set one ("Coin Lid").
     var name: String?
     var items: [BuildItem]
+    /// Print time and filament weight, once the plate has been sliced.
+    var estimate: SliceEstimate?
 }
 
 struct ParseResult {
@@ -42,6 +44,8 @@ struct ParseResult {
     var plateIndex: Int?
     /// The slicer print profile, for Bambu Studio / OrcaSlicer projects.
     var printSettings: PrintSettings?
+    /// The slicer's estimate for the plate being shown, if it has been sliced.
+    var sliceEstimate: SliceEstimate?
 
     var plateCount: Int { plates.count }
 
@@ -52,6 +56,7 @@ struct ParseResult {
         var copy = self
         copy.items = plates[index].items
         copy.plateIndex = index
+        copy.sliceEstimate = plates[index].estimate
         return copy
     }
 
@@ -259,21 +264,26 @@ final class ThreeMFParser {
         // together scatters the model across the bed and makes the dimensions meaningless.
         // Group by plate and show one; the caller can page through the rest. Plates the
         // slicer declared but left empty are kept, so plate numbering matches the slicer's.
-        let plates: [PlateContents] = project.plates.map { plate in
+        let plates: [PlateContents] = project.plates.enumerated().map { position, plate in
             let members = Set(plate.objectIDs)
             return PlateContents(
                 name: plate.name,
-                items: expanded.filter { members.contains($0.objectID) }.flatMap { $0.items }
+                items: expanded.filter { members.contains($0.objectID) }.flatMap { $0.items },
+                estimate: project.estimate(forPlateAt: position)
             )
         }
         let shownPlate = plates.firstIndex { !$0.items.isEmpty }
+        // A file without plate assignments but with exactly one sliced plate still gets it.
+        let estimate = shownPlate.flatMap { plates[$0].estimate }
+            ?? (plates.isEmpty && project.sliceEstimates.count == 1 ? project.sliceEstimates.first?.value : nil)
 
         return ParseResult(
             items: shownPlate.map { plates[$0].items } ?? result,
             metadata: metadata,
             plates: plates,
             plateIndex: shownPlate,
-            printSettings: project.printSettings.isEmpty ? nil : project.printSettings
+            printSettings: project.printSettings.isEmpty ? nil : project.printSettings,
+            sliceEstimate: estimate
         )
     }
 
