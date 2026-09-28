@@ -1158,7 +1158,8 @@ final class ThreeMFParserTests: XCTestCase {
             plates: [[2], [3]],
             sliceInfo: makeSliceInfo([(1, "8040", "38.21"), (2, "900", "4.5")])
         ))
-        XCTAssertEqual(result.sliceEstimate, SliceEstimate(printSeconds: 8040, filamentGrams: 38.21))
+        XCTAssertEqual(result.sliceEstimate?.printSeconds, 8040)
+        XCTAssertEqual(result.sliceEstimate?.filamentGrams, 38.21)
         XCTAssertEqual(result.sliceEstimate?.summary, ["2h 14m", "38.2 g"])
         let second = try XCTUnwrap(result.showingPlate(1))
         XCTAssertEqual(second.sliceEstimate?.summary, ["15m", "4.5 g"])
@@ -1212,6 +1213,63 @@ final class ThreeMFParserTests: XCTestCase {
             sliceInfo: makeSliceInfo([(1, "0", "n/a")])
         ))
         XCTAssertNil(result.sliceEstimate)
+    }
+
+    /// One sliced plate using the given filaments, as Bambu Studio lists them.
+    private func makeSliceInfo(filaments: [(slot: Int, type: String, color: String, grams: String)]) -> String {
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config><plate>"
+        xml += "<metadata key=\"index\" value=\"1\"/><metadata key=\"prediction\" value=\"4706\"/>"
+        xml += "<metadata key=\"weight\" value=\"19.14\"/>"
+        for filament in filaments {
+            xml += "<filament id=\"\(filament.slot)\" tray_info_idx=\"GFA00\" type=\"\(filament.type)\" "
+            xml += "color=\"\(filament.color)\" used_m=\"1.0\" used_g=\"\(filament.grams)\" group_id=\"0\"/>"
+        }
+        return xml + "</plate></config>"
+    }
+
+    private func parseSingleSlicedPlate(_ sliceInfo: String) throws -> ParseResult {
+        try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            plates: [[2]],
+            sliceInfo: sliceInfo
+        ))
+    }
+
+    func testFilamentBreakdownForMultiFilamentPlate() throws {
+        // Listed out of order to check the breakdown follows slot order.
+        let result = try parseSingleSlicedPlate(makeSliceInfo(filaments: [
+            (3, "PLA", "#0086D6", "3.18"), (1, "PLA", "#C12E1F", "13.07"), (2, "PLA", "#FFFFFF", "2.88"),
+        ]))
+        let estimate = try XCTUnwrap(result.sliceEstimate)
+        XCTAssertEqual(estimate.filaments.map(\.slot), [1, 2, 3])
+        XCTAssertEqual(estimate.filaments[1].color, SIMD4<Float>(1, 1, 1, 1))
+        XCTAssertEqual(estimate.filamentBreakdown.map(\.label), ["13.1 g", "2.9 g", "3.2 g"],
+                       "all PLA, so the type is left out")
+    }
+
+    func testFilamentBreakdownNamesTypesWhenMixed() throws {
+        let result = try parseSingleSlicedPlate(makeSliceInfo(filaments: [
+            (1, "PLA", "#C12E1F", "13.07"), (2, "PETG", "#FFFFFF", "2.88"),
+        ]))
+        XCTAssertEqual(result.sliceEstimate?.filamentBreakdown.map(\.label), ["PLA 13.1 g", "PETG 2.9 g"])
+    }
+
+    func testSingleFilamentPlateHasNoBreakdown() throws {
+        // The one weight is already the total; a breakdown would only repeat it.
+        let result = try parseSingleSlicedPlate(makeSliceInfo(filaments: [(1, "PLA", "#C12E1F", "35.00")]))
+        XCTAssertEqual(result.sliceEstimate?.filaments.count, 1)
+        XCTAssertEqual(result.sliceEstimate?.filamentBreakdown.isEmpty, true)
+    }
+
+    func testUnusedFilamentIsLeftOutOfBreakdown() throws {
+        let result = try parseSingleSlicedPlate(makeSliceInfo(filaments: [
+            (1, "PLA", "#C12E1F", "13.07"), (2, "PLA", "#FFFFFF", "0.00"), (3, "PLA", "not-a-colour", "3.18"),
+        ]))
+        let estimate = try XCTUnwrap(result.sliceEstimate)
+        XCTAssertEqual(estimate.filaments.map(\.slot), [1, 3])
+        XCTAssertNil(estimate.filaments[1].color, "an unparseable colour is kept as unknown, not dropped")
     }
 
     func testSliceEstimateFormatting() {

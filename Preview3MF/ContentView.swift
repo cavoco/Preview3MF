@@ -170,6 +170,18 @@ struct ModelInfoView: View {
             if let estimate = result.sliceEstimate?.summary, !estimate.isEmpty {
                 LabeledContent("Estimate", value: estimate.joined(separator: " · "))
             }
+            if let breakdown = result.sliceEstimate?.filamentBreakdown, !breakdown.isEmpty {
+                LabeledContent("Filament") {
+                    HStack(spacing: 12) {
+                        ForEach(breakdown.indices, id: \.self) { index in
+                            HStack(spacing: 4) {
+                                FilamentSwatch(color: breakdown[index].color)
+                                Text(breakdown[index].label)
+                            }
+                        }
+                    }
+                }
+            }
 
             Divider()
 
@@ -203,6 +215,19 @@ struct ModelInfoView: View {
     private static func formatDim(_ v: Float) -> String {
         if v >= 100 { return String(format: "%.0f", v) }
         return String(format: "%.1f", v)
+    }
+}
+
+/// A filament's colour as a small dot. The outline keeps white filament visible on a light
+/// background; an unknown colour is drawn hollow.
+struct FilamentSwatch: View {
+    let color: SIMD4<Float>?
+
+    var body: some View {
+        Circle()
+            .fill(color.map { Color(red: Double($0.x), green: Double($0.y), blue: Double($0.z)) } ?? .clear)
+            .overlay(Circle().strokeBorder(.secondary, lineWidth: 0.5))
+            .frame(width: 8, height: 8)
     }
 }
 

@@ -293,17 +293,45 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
 struct SliceEstimate: Equatable {
     var printSeconds: Int?
     var filamentGrams: Double?
+    /// Per-filament usage in slot order. Only worth showing when there is more than one.
+    var filaments: [FilamentUsage] = []
 
-    var isEmpty: Bool { printSeconds == nil && filamentGrams == nil }
+    /// One filament's share of a plate, e.g. 13.1 g of red PLA from slot 1.
+    struct FilamentUsage: Equatable {
+        var slot: Int
+        var type: String?
+        var color: SIMD4<Float>?
+        var grams: Double
+    }
+
+    var isEmpty: Bool { printSeconds == nil && filamentGrams == nil && filaments.isEmpty }
+
+    /// Labels for a multi-filament breakdown, paired with each filament's colour. The type is
+    /// named only when the plate mixes types, since "PLA" three times over is noise. Empty
+    /// for a single-filament plate, whose one weight is already the total.
+    var filamentBreakdown: [(color: SIMD4<Float>?, label: String)] {
+        guard filaments.count > 1 else { return [] }
+        let mixedTypes = Set(filaments.map { $0.type ?? "" }).count > 1
+        return filaments.map { filament in
+            let weight = Self.formatGrams(filament.grams)
+            guard mixedTypes, let type = filament.type, !type.isEmpty else {
+                return (filament.color, weight)
+            }
+            return (filament.color, "\(type) \(weight)")
+        }
+    }
 
     /// Short phrases in reading order: "2h 14m", "38.2 g".
     var summary: [String] {
         var parts: [String] = []
         if let printSeconds { parts.append(Self.formatDuration(printSeconds)) }
-        if let filamentGrams {
-            parts.append(String(format: filamentGrams >= 100 ? "%.0f g" : "%.1f g", filamentGrams))
-        }
+        if let filamentGrams { parts.append(Self.formatGrams(filamentGrams)) }
         return parts
+    }
+
+    /// "212 g", "38.2 g".
+    static func formatGrams(_ grams: Double) -> String {
+        String(format: grams >= 100 ? "%.0f g" : "%.1f g", grams)
     }
 
     /// Whole minutes, rounded, with hours when there are any: "45m", "2h 14m", "<1m".
@@ -324,7 +352,7 @@ struct SliceEstimate: Equatable {
 ///     <metadata key="index" value="1"/>
 ///     <metadata key="prediction" value="8040"/>   <!-- seconds -->
 ///     <metadata key="weight" value="38.21"/>      <!-- grams -->
-///     <filament id="1" type="PLA" used_m="12.7" used_g="38.21"/>
+///     <filament id="1" type="PLA" color="#C12E1F" used_m="12.7" used_g="38.21"/>
 ///   </plate>
 /// </config>
 /// ```
@@ -357,6 +385,16 @@ final class SliceInfoDelegate: NSObject, XMLParserDelegate {
             case "weight": current.filamentGrams = number
             default: break
             }
+        case "filament" where inPlate:
+            guard let slot = attributes["id"].flatMap(Int.init),
+                  let grams = attributes["used_g"].flatMap(Double.init),
+                  grams.isFinite, grams > 0 else { return }
+            current.filaments.append(SliceEstimate.FilamentUsage(
+                slot: slot,
+                type: attributes["type"].flatMap { $0.isEmpty ? nil : $0 },
+                color: attributes["color"].flatMap(ModelXMLDelegate.parseDisplayColor),
+                grams: grams
+            ))
         default:
             break
         }
@@ -369,6 +407,7 @@ final class SliceInfoDelegate: NSObject, XMLParserDelegate {
         qualifiedName: String?
     ) {
         guard elementName == "plate" else { return }
+        current.filaments.sort { $0.slot < $1.slot }
         if let currentIndex, !current.isEmpty {
             estimates[currentIndex] = current
         }

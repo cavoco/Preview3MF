@@ -153,8 +153,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         // Text first. It costs nothing to set, and paging should feel immediate even
         // though rebuilding the geometry behind it does not.
-        infoLabel.stringValue = buildInfoString(result)
         infoLabel.textColor = foreground
+        infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground)
         plateLabel.textColor = foreground
         let overlayBackground = NSColor(white: appearance == .dark ? 0 : 1, alpha: 0.5).cgColor
         plateControl.layer?.backgroundColor = overlayBackground
@@ -199,6 +199,42 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             return "\(counter) · \(name)"
         }
         return counter
+    }
+
+    /// The info text, plus a line of colour-swatched weights for a multi-filament plate.
+    private func buildInfoText(_ result: ParseResult, foreground: NSColor) -> NSAttributedString {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: foreground,
+        ]
+        let text = NSMutableAttributedString(string: buildInfoString(result), attributes: attributes)
+        let breakdown = result.sliceEstimate?.filamentBreakdown ?? []
+        for (index, filament) in breakdown.enumerated() {
+            text.append(NSAttributedString(string: index == 0 ? "\n" : "   ", attributes: attributes))
+            let swatch = NSTextAttachment()
+            swatch.image = swatchImage(filament.color, outline: foreground)
+            swatch.bounds = NSRect(x: 0, y: -1, width: 9, height: 9)
+            text.append(NSAttributedString(attachment: swatch))
+            text.append(NSAttributedString(string: " " + filament.label, attributes: attributes))
+        }
+        return text
+    }
+
+    /// A filled dot in the filament's colour, outlined so white filament still shows against
+    /// a light overlay. An unknown colour is drawn hollow.
+    private func swatchImage(_ color: SIMD4<Float>?, outline: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 9, height: 9), flipped: false) { rect in
+            let dot = NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5))
+            if let color {
+                NSColor(srgbRed: CGFloat(color.x), green: CGFloat(color.y),
+                        blue: CGFloat(color.z), alpha: 1).setFill()
+                dot.fill()
+            }
+            outline.withAlphaComponent(0.6).setStroke()
+            dot.lineWidth = 1
+            dot.stroke()
+            return true
+        }
     }
 
     private func buildInfoString(_ result: ParseResult) -> String {
