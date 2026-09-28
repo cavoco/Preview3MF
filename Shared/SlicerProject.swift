@@ -8,6 +8,8 @@ import ZIPFoundation
 /// - the filament palette, in `project_settings.config` (JSON)
 /// - each object's filament slot, whether a part is a boolean cutting tool, and which build
 ///   plate an object sits on, in `model_settings.config` (XML)
+/// - once a plate has been sliced, its estimated print time and filament weight, in
+///   `slice_info.config` (XML)
 ///
 /// None of this is part of the 3MF spec, so everything here is best-effort: a missing or
 /// malformed file yields an empty value and the caller falls back to its previous behaviour.
@@ -22,10 +24,14 @@ struct SlicerProject {
     var plates: [Plate] = []
     /// The print profile the project was saved with.
     var printSettings = PrintSettings()
+    /// Slicer estimates keyed by 1-based plate id. Only plates that have been sliced appear.
+    var sliceEstimates: [Int: SliceEstimate] = [:]
 
     /// One build plate: the objects placed on it, plus the name the user gave it in the
     /// slicer ("Coin Lid"), which is blank far more often than not.
     struct Plate {
+        /// The slicer's 1-based `plater_id`, which is how `slice_info.config` refers to it.
+        var id: Int?
         var name: String?
         var objectIDs: [Int]
     }
@@ -42,6 +48,13 @@ struct SlicerProject {
         return filamentColors[slot - 1]
     }
 
+    /// The slice estimate for the plate at `position` in `plates`. Matched by plate id, not
+    /// position, since only sliced plates are listed in `slice_info.config`.
+    func estimate(forPlateAt position: Int) -> SliceEstimate? {
+        guard plates.indices.contains(position) else { return nil }
+        return sliceEstimates[plates[position].id ?? position + 1]
+    }
+
     static func read(from archive: Archive) -> SlicerProject {
         var project = SlicerProject()
         if let data = entryData(archive, "Metadata/project_settings.config") {
@@ -56,6 +69,14 @@ struct SlicerProject {
                 project.objectExtruder = delegate.objectExtruder
                 project.negativeParts = delegate.negativeParts
                 project.plates = delegate.plates
+            }
+        }
+        if let data = entryData(archive, "Metadata/slice_info.config") {
+            let delegate = SliceInfoDelegate()
+            let parser = XMLParser(data: data)
+            parser.delegate = delegate
+            if parser.parse() {
+                project.sliceEstimates = delegate.estimates
             }
         }
         // The palette lists every loaded filament slot, not just the ones this model prints
@@ -197,6 +218,7 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
     private var inModelInstance = false
     private var currentPlateObjects: [Int] = []
     private var currentPlateName: String?
+    private var currentPlateID: Int?
 
     func parser(
         _ parser: XMLParser,
@@ -218,6 +240,7 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
             inPlate = true
             currentPlateObjects = []
             currentPlateName = nil
+            currentPlateID = nil
         case "model_instance":
             inModelInstance = true
         case "metadata":
@@ -230,6 +253,9 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
             }
             if key == "plater_name", inPlate, !inModelInstance, !value.isEmpty {
                 currentPlateName = value
+            }
+            if key == "plater_id", inPlate, !inModelInstance {
+                currentPlateID = Int(value)
             }
         default:
             break
@@ -251,12 +277,140 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
         case "model_instance":
             inModelInstance = false
         case "plate":
-            plates.append(SlicerProject.Plate(name: currentPlateName, objectIDs: currentPlateObjects))
+            plates.append(SlicerProject.Plate(id: currentPlateID, name: currentPlateName,
+                                              objectIDs: currentPlateObjects))
             currentPlateObjects = []
             currentPlateName = nil
+            currentPlateID = nil
             inPlate = false
         default:
             break
         }
+    }
+}
+
+/// What the slicer predicted for one sliced plate.
+struct SliceEstimate: Equatable {
+    var printSeconds: Int?
+    var filamentGrams: Double?
+    /// Per-filament usage in slot order. Only worth showing when there is more than one.
+    var filaments: [FilamentUsage] = []
+
+    /// One filament's share of a plate, e.g. 13.1 g of red PLA from slot 1.
+    struct FilamentUsage: Equatable {
+        var slot: Int
+        var type: String?
+        var color: SIMD4<Float>?
+        var grams: Double
+    }
+
+    var isEmpty: Bool { printSeconds == nil && filamentGrams == nil && filaments.isEmpty }
+
+    /// Labels for a multi-filament breakdown, paired with each filament's colour. The type is
+    /// named only when the plate mixes types, since "PLA" three times over is noise. Empty
+    /// for a single-filament plate, whose one weight is already the total.
+    var filamentBreakdown: [(color: SIMD4<Float>?, label: String)] {
+        guard filaments.count > 1 else { return [] }
+        let mixedTypes = Set(filaments.map { $0.type ?? "" }).count > 1
+        return filaments.map { filament in
+            let weight = Self.formatGrams(filament.grams)
+            guard mixedTypes, let type = filament.type, !type.isEmpty else {
+                return (filament.color, weight)
+            }
+            return (filament.color, "\(type) \(weight)")
+        }
+    }
+
+    /// Short phrases in reading order: "2h 14m", "38.2 g".
+    var summary: [String] {
+        var parts: [String] = []
+        if let printSeconds { parts.append(Self.formatDuration(printSeconds)) }
+        if let filamentGrams { parts.append(Self.formatGrams(filamentGrams)) }
+        return parts
+    }
+
+    /// "212 g", "38.2 g".
+    static func formatGrams(_ grams: Double) -> String {
+        String(format: grams >= 100 ? "%.0f g" : "%.1f g", grams)
+    }
+
+    /// Whole minutes, rounded, with hours when there are any: "45m", "2h 14m", "<1m".
+    static func formatDuration(_ seconds: Int) -> String {
+        let minutes = (seconds + 30) / 60
+        guard minutes > 0 else { return "<1m" }
+        let hours = minutes / 60
+        return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
+    }
+}
+
+/// Reads `Metadata/slice_info.config`, which the slicer fills in only for plates it has sliced.
+///
+/// Shape, trimmed to what matters here:
+/// ```xml
+/// <config>
+///   <plate>
+///     <metadata key="index" value="1"/>
+///     <metadata key="prediction" value="8040"/>   <!-- seconds -->
+///     <metadata key="weight" value="38.21"/>      <!-- grams -->
+///     <filament id="1" type="PLA" color="#C12E1F" used_m="12.7" used_g="38.21"/>
+///   </plate>
+/// </config>
+/// ```
+/// An unsliced project still has the file, holding only a `<header>`.
+final class SliceInfoDelegate: NSObject, XMLParserDelegate {
+    var estimates: [Int: SliceEstimate] = [:]
+
+    private var inPlate = false
+    private var currentIndex: Int?
+    private var current = SliceEstimate()
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName: String?,
+        attributes: [String: String]
+    ) {
+        switch elementName {
+        case "plate":
+            inPlate = true
+            currentIndex = nil
+            current = SliceEstimate()
+        case "metadata" where inPlate:
+            guard let key = attributes["key"], let value = attributes["value"],
+                  let number = Double(value), number.isFinite, number > 0 else { return }
+            switch key {
+            case "index": currentIndex = Int(number)
+            case "prediction": current.printSeconds = Int(number.rounded())
+            case "weight": current.filamentGrams = number
+            default: break
+            }
+        case "filament" where inPlate:
+            guard let slot = attributes["id"].flatMap(Int.init),
+                  let grams = attributes["used_g"].flatMap(Double.init),
+                  grams.isFinite, grams > 0 else { return }
+            current.filaments.append(SliceEstimate.FilamentUsage(
+                slot: slot,
+                type: attributes["type"].flatMap { $0.isEmpty ? nil : $0 },
+                color: attributes["color"].flatMap(ModelXMLDelegate.parseDisplayColor),
+                grams: grams
+            ))
+        default:
+            break
+        }
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName: String?
+    ) {
+        guard elementName == "plate" else { return }
+        current.filaments.sort { $0.slot < $1.slot }
+        if let currentIndex, !current.isEmpty {
+            estimates[currentIndex] = current
+        }
+        inPlate = false
     }
 }
