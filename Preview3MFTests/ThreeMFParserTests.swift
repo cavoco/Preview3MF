@@ -1672,4 +1672,219 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertNil(ThreeMFParser.cleanMetadata("<p>&amp;nbsp;</p>"))
         XCTAssertNil(ThreeMFParser.cleanMetadata("   "))
     }
+
+    // MARK: - Benchmarks
+    //
+    // Baseline for lazy per-plate loading. The parser currently extracts and parses every
+    // `.model` entry in the package, though only one plate is shown, so peak memory grows
+    // with the whole project rather than with the plate on screen. These log parse time and
+    // peak physical footprint; once plates load lazily, the synthetic comparison becomes an
+    // assertion. Times come from the Debug build that tests run in, so compare them with
+    // each other rather than with Release.
+
+    /// Builds a package shaped like a Bambu Studio project: root containers whose meshes
+    /// live in per-object files under `3D/Objects/`, referenced by `p:path`, one container
+    /// per plate. Every plate carries the same triangle count, so a result can be checked
+    /// against a single plate's worth of geometry.
+    private func makeMultiPlateProject(plates: Int, trianglesPerPlate: Int) -> Data {
+        var root = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        root += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\""
+        root += " xmlns:p=\"http://schemas.microsoft.com/3dmanufacturing/production/2015/06\""
+        root += " requiredextensions=\"p\"><resources>"
+        var entries: [MiniZIP.Entry] = []
+        var config = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config>"
+
+        for plate in 1...plates {
+            let meshID = plate
+            let containerID = 100 + plate
+            let path = "3D/Objects/object_\(plate).model"
+            root += "<object id=\"\(containerID)\" type=\"model\"><components>"
+            root += "<component p:path=\"/\(path)\" objectid=\"\(meshID)\"/>"
+            root += "</components></object>"
+
+            // A triangle strip: every vertex after the first two closes a new triangle.
+            var mesh = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            mesh += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">"
+            mesh += "<resources><object id=\"\(meshID)\" type=\"model\"><mesh><vertices>"
+            for v in 0..<(trianglesPerPlate + 2) {
+                mesh += "<vertex x=\"\(Float(v / 2) * 0.1)\" y=\"\(Float(v % 2))\" z=\"\(Float(plate))\"/>"
+            }
+            mesh += "</vertices><triangles>"
+            for t in 0..<trianglesPerPlate {
+                mesh += "<triangle v1=\"\(t)\" v2=\"\(t + 1)\" v3=\"\(t + 2)\"/>"
+            }
+            mesh += "</triangles></mesh></object></resources><build/></model>"
+            entries.append(.init(path: path, data: Data(mesh.utf8)))
+
+            config += "<object id=\"\(containerID)\"><metadata key=\"name\" value=\"part\(plate)\"/></object>"
+        }
+        root += "</resources><build>"
+        for plate in 1...plates {
+            root += "<item objectid=\"\(100 + plate)\"/>"
+        }
+        root += "</build></model>"
+
+        for plate in 1...plates {
+            config += "<plate><metadata key=\"plater_id\" value=\"\(plate)\"/>"
+            config += "<model_instance><metadata key=\"object_id\" value=\"\(100 + plate)\"/>"
+            config += "<metadata key=\"instance_id\" value=\"0\"/></model_instance></plate>"
+        }
+        config += "</config>"
+
+        entries.insert(.init(path: "3D/3dmodel.model", data: Data(root.utf8)), at: 0)
+        entries.append(.init(path: "Metadata/model_settings.config", data: Data(config.utf8)))
+        return MiniZIP.createArchive(entries: entries)
+    }
+
+    /// Current physical footprint — the figure the system's memory limits are judged on.
+    private static func physFootprint() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size
+        )
+        let status = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return status == KERN_SUCCESS ? info.phys_footprint : 0
+    }
+
+    /// Bytes in live malloc allocations. Unlike the footprint, this ignores pages that
+    /// earlier work freed but the allocator kept, so it isolates what one parse holds.
+    private static func heapInUse() -> UInt64 {
+        var stats = malloc_statistics_t()
+        malloc_zone_statistics(nil, &stats)
+        return UInt64(stats.size_in_use)
+    }
+
+    private struct ParseMeasurement {
+        let result: ParseResult
+        let seconds: Double
+        /// Peak live heap above what the process held before parsing began — the figure to
+        /// compare between parses.
+        let heapPeakBytes: UInt64
+        /// Peak footprint above the starting footprint. Understated when the parse reuses
+        /// pages freed by earlier work, but it is what the system's memory limits judge.
+        let footprintPeakBytes: UInt64
+
+        var heapPeakMB: Double { Double(heapPeakBytes) / 1_048_576 }
+        var footprintPeakMB: Double { Double(footprintPeakBytes) / 1_048_576 }
+    }
+
+    /// Parses `url` once, sampling memory every millisecond on a background thread. The
+    /// kernel's own peak counter can't be reset, so sampling is what lets one test compare
+    /// two parses. The parser's large buffers live for tens of milliseconds at least, so a
+    /// 1 ms interval sees them.
+    private func measureParse(of url: URL) throws -> ParseMeasurement {
+        malloc_zone_pressure_relief(nil, 0)
+        let heapBaseline = Self.heapInUse()
+        let footprintBaseline = Self.physFootprint()
+        let lock = NSLock()
+        var heapPeak = heapBaseline
+        var footprintPeak = footprintBaseline
+        var sampling = true
+
+        func sample() {
+            let heap = Self.heapInUse()
+            let footprint = Self.physFootprint()
+            lock.withLock {
+                heapPeak = max(heapPeak, heap)
+                footprintPeak = max(footprintPeak, footprint)
+            }
+        }
+
+        let sampler = Thread {
+            while lock.withLock({ sampling }) {
+                sample()
+                usleep(1_000)
+            }
+        }
+        sampler.start()
+
+        let start = Date()
+        let result = try ThreeMFParser.parse(fileAt: url)
+        let seconds = Date().timeIntervalSince(start)
+
+        sample()
+        lock.withLock { sampling = false }
+        return lock.withLock {
+            ParseMeasurement(
+                result: result,
+                seconds: seconds,
+                heapPeakBytes: heapPeak - heapBaseline,
+                footprintPeakBytes: footprintPeak - footprintBaseline
+            )
+        }
+    }
+
+    private func log(_ label: String, _ m: ParseMeasurement) {
+        report(String(
+            format: "[benchmark] %@: %.3f s, heap peak +%.1f MB, footprint peak +%.1f MB, %d plates, %d triangles shown",
+            label, m.seconds, m.heapPeakMB, m.footprintPeakMB, m.result.plateCount, m.result.totalTriangles
+        ))
+    }
+
+    /// Prints for the Xcode console, and records an activity so the line also survives in
+    /// the result bundle, where xcodebuild runs can read it back
+    /// (`xcrun xcresulttool get test-results activities`).
+    private func report(_ line: String) {
+        print(line)
+        XCTContext.runActivity(named: line) { _ in }
+    }
+
+    func testBenchmarkPeakMemoryAgainstPlateCount() throws {
+        // ~25 MB of model XML per plate: big enough that the parser's buffers dwarf the
+        // sampling noise.
+        let trianglesPerPlate = 250_000
+        let plateCounts = [1, 4]
+        // Write every fixture before measuring anything, so building one isn't counted.
+        var urls: [Int: URL] = [:]
+        for plates in plateCounts {
+            urls[plates] = try autoreleasepool {
+                try writeTempFile(makeMultiPlateProject(plates: plates, trianglesPerPlate: trianglesPerPlate))
+            }
+        }
+        defer { urls.values.forEach { try? FileManager.default.removeItem(at: $0) } }
+
+        var measurements: [Int: ParseMeasurement] = [:]
+        for plates in plateCounts {
+            let m = try measureParse(of: try XCTUnwrap(urls[plates]))
+            log("synthetic \(plates)-plate", m)
+
+            XCTAssertEqual(m.result.plateCount, plates)
+            XCTAssertEqual(m.result.plateIndex, 0)
+            XCTAssertEqual(m.result.totalTriangles, trianglesPerPlate, "only the first plate should be shown")
+            // Paging must still reach the last plate's full geometry.
+            let last = try XCTUnwrap(m.result.showingPlate(plates - 1))
+            XCTAssertEqual(last.totalTriangles, trianglesPerPlate)
+            measurements[plates] = m
+        }
+
+        let one = try XCTUnwrap(measurements[1]).heapPeakMB
+        let four = try XCTUnwrap(measurements[4]).heapPeakMB
+        report(String(format: "[benchmark] 4-plate / 1-plate heap peak ratio: %.2f", four / max(one, 0.1)))
+    }
+
+    /// Runs against a real, large project when one is to hand: the file named by
+    /// `PREVIEW3MF_BENCHMARK_FILE`, else `large.3mf` at the repo root. Neither is
+    /// committed — third-party models aren't ours to redistribute — so this skips in CI.
+    func testBenchmarkLocalLargeProject() throws {
+        let url: URL
+        if let path = ProcessInfo.processInfo.environment["PREVIEW3MF_BENCHMARK_FILE"] {
+            url = URL(fileURLWithPath: path)
+        } else {
+            url = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("large.3mf")
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw XCTSkip("No local benchmark file at \(url.path)")
+        }
+
+        let m = try measureParse(of: url)
+        log(url.lastPathComponent, m)
+        XCTAssertGreaterThan(m.result.totalTriangles, 0)
+    }
 }
