@@ -200,12 +200,18 @@ final class ThreeMFParser {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-        let fileData = try Data(contentsOf: url)
-        var patched = fileData
-        ThreeMFParser.patchZIP64Sentinels(&patched)
-
+        // Mapped, not read: checking for ZIP64 sentinels touches only the headers' pages.
+        // The mapping is read-only, so it must never be patched in place.
+        var mapped = try Data(contentsOf: url, options: .alwaysMapped)
         do {
-            return try Archive(data: patched, accessMode: .read)
+            if ThreeMFParser.patchZIP64Sentinels(&mapped, checkOnly: true) {
+                var data = mapped.withUnsafeBytes { Data($0) }
+                ThreeMFParser.patchZIP64Sentinels(&data)
+                return try Archive(data: data, accessMode: .read)
+            }
+            // Nothing to patch: read from disk as needed, so the package isn't held in
+            // memory for as long as it is previewed.
+            return try Archive(url: url, accessMode: .read)
         } catch {
             throw ThreeMFParserError.cannotOpenArchive
         }
@@ -231,9 +237,13 @@ final class ThreeMFParser {
     // MARK: - ZIP64 patching
 
     /// Rewrite ZIP64 sentinel values (0xFFFFFFFF) throughout the archive so that
-    /// ZIPFoundation's Data-backed provider can process the file correctly.
-    private static func patchZIP64Sentinels(_ data: inout Data) {
+    /// ZIPFoundation's Data-backed provider can process the file correctly. Returns whether
+    /// anything needed rewriting; with `checkOnly`, stops at the first such value without
+    /// writing, so it is safe on a read-only mapping.
+    @discardableResult
+    private static func patchZIP64Sentinels(_ data: inout Data, checkOnly: Bool = false) -> Bool {
         let sentinel32: UInt32 = 0xFFFF_FFFF
+        var patchedAny = false
 
         // --- 1. Patch local file headers (PK\x03\x04) ---
         var offset = 0
@@ -248,6 +258,8 @@ final class ThreeMFParser {
             let extraStart = offset + 30 + nameLen
 
             if compSize == sentinel32 || uncompSize == sentinel32 {
+                if checkOnly { return true }
+                patchedAny = true
                 patchZIP64Extra(&data, extraStart: extraStart, extraLen: extraLen,
                                 compOffset: offset + 18, uncompOffset: offset + 22,
                                 localHeaderOffset: nil,
@@ -261,16 +273,18 @@ final class ThreeMFParser {
         }
 
         // --- 2. Find EOCD (PK\x05\x06) and patch cd_offset ---
-        guard let eocdOffset = findSignature(data, sig: [0x50, 0x4B, 0x05, 0x06]) else { return }
+        guard let eocdOffset = findSignature(data, sig: [0x50, 0x4B, 0x05, 0x06]) else { return patchedAny }
         var cdOffset = Int(load32(data, eocdOffset + 16))
 
         if cdOffset == Int(sentinel32) {
             // Read real offset from ZIP64 EOCD record (PK\x06\x06)
             if let zip64EOCD = findSignature(data, sig: [0x50, 0x4B, 0x06, 0x06]) {
+                if checkOnly { return true }
                 let realCDOffset = load64(data, zip64EOCD + 48)
                 cdOffset = Int(realCDOffset)
                 let patched = UInt32(clamping: min(realCDOffset, UInt64(UInt32.max - 1)))
                 store32(&data, eocdOffset + 16, patched)
+                patchedAny = true
             }
         }
 
@@ -289,6 +303,8 @@ final class ThreeMFParser {
             let cdExtraStart = cdOff + 46 + cdNameLen
 
             if cdCompSize == sentinel32 || cdUncompSize == sentinel32 || cdLocalOffset == sentinel32 {
+                if checkOnly { return true }
+                patchedAny = true
                 patchZIP64Extra(&data, extraStart: cdExtraStart, extraLen: cdExtraLen,
                                 compOffset: cdOff + 20, uncompOffset: cdOff + 24,
                                 localHeaderOffset: cdOff + 42,
@@ -299,6 +315,7 @@ final class ThreeMFParser {
 
             cdOff += 46 + cdNameLen + cdExtraLen + cdCommentLen
         }
+        return patchedAny
     }
 
     /// Walk extra fields to find ZIP64 tag (0x0001) and patch sentinel values.
@@ -542,12 +559,12 @@ final class ThreeMFPackage {
         files = files.filter { paths.contains($0.key) }
         for path in paths where files[path] == nil {
             guard let entry = entries[path] else { continue }
-            var xmlData = Data()
-            _ = try archive.extract(entry) { chunk in
-                xmlData.append(chunk)
+            // Streamed straight from the zip into the parser; the XML is never held whole.
+            let parser = FastModelParser()
+            _ = try archive.extract(entry, bufferSize: 256 * 1024) { chunk in
+                parser.feed(chunk)
             }
-            // A file that fails to parse still counts as loaded, with nothing in it.
-            files[path] = ModelFile(xmlData)
+            files[path] = ModelFile(parser)
         }
         assembly = Assembly(
             project: project,
@@ -626,9 +643,8 @@ private struct ModelFile {
     var buildItems: [ObjectReference] = []
     var metadata: [String: String] = [:]
 
-    init(_ xml: Data) {
-        let parser = FastModelParser()
-        guard parser.parse(xml) else { return }
+    /// From a parser that has been fed the whole file.
+    init(_ parser: FastModelParser) {
         for (id, object) in parser.objects {
             if !object.vertices.isEmpty {
                 meshes[id] = MeshData(
@@ -911,6 +927,9 @@ extension FastModelParser {
 /// dominates parse time. This walks the raw UTF-8 bytes and reads numbers directly with
 /// `strtod`/`strtol`, allocating nothing per element. (3MF always uses `.` as the decimal
 /// separator, matching the process's default C numeric locale.)
+///
+/// Input can arrive in chunks through `feed`, straight from the zip, so a model file is
+/// never held whole — the largest in a big Bambu project runs past 100 MB of XML.
 final class FastModelParser {
     var objects: [Int: ParsedObject] = [:]
     var buildItems: [ObjectReference] = []
@@ -929,10 +948,39 @@ final class FastModelParser {
     private var objectPIndex: Int?
     private var inBuild = false
 
+    /// The open `<metadata>` element's name, and its text so far from earlier chunks.
+    private var metaName: String?
+    private var metaCarriedText: [UInt8] = []
+    /// Input after the last complete tag, waiting for the rest of it.
+    private var pending = Data()
+
     private let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
 
+    /// Parses a whole document at once.
     func parse(_ data: Data) -> Bool {
-        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+        feed(data)
+        return true
+    }
+
+    /// Parses the next chunk of the document. Everything up to the last `>` is made of
+    /// complete tags and is scanned now; the tail waits for the next chunk.
+    func feed(_ chunk: Data) {
+        pending.append(chunk)
+        let end: Int? = pending.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            var e = bytes.count - 1
+            while e >= 0, bytes[e] != UInt8(ascii: ">") { e -= 1 }
+            guard e >= 0 else { return nil }
+            scan(UnsafeRawBufferPointer(rebasing: raw[0...e]))
+            return e + 1
+        }
+        if let end {
+            pending = pending.subdata(in: pending.startIndex + end..<pending.endIndex)
+        }
+    }
+
+    private func scan(_ raw: UnsafeRawBufferPointer) {
+        do {
             let bytes = raw.bindMemory(to: UInt8.self)
             let base = raw.baseAddress!.assumingMemoryBound(to: CChar.self)
             let n = bytes.count
@@ -984,7 +1032,7 @@ final class FastModelParser {
             }
 
             var i = 0
-            var metaName: String?
+            // Text of a <metadata> opened in an earlier chunk resumes at the start of this one.
             var metaTextStart = 0
 
             while i < n {
@@ -1030,10 +1078,13 @@ final class FastModelParser {
                         currentGroupID = nil; currentGroupColors = []
                     } else if nameIs(ns, nl, "metadata") {
                         if let name = metaName {
-                            let text = str(metaTextStart, i).trimmingCharacters(in: .whitespacesAndNewlines)
+                            metaCarriedText.append(contentsOf: UnsafeBufferPointer(rebasing: bytes[metaTextStart..<i]))
+                            let text = String(decoding: metaCarriedText, as: UTF8.self)
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
                             if !text.isEmpty { metadata[name] = Self.decodeEntities(text) }
                         }
                         metaName = nil
+                        metaCarriedText = []
                     } else if nameIs(ns, nl, "build") {
                         inBuild = false
                     }
@@ -1144,13 +1195,21 @@ final class FastModelParser {
                         if nameIs(an, al, "name") { name = str(vs, valueEnd(vs)) }
                     }
                     // Self-closing (<metadata .../>) carries no text.
-                    if attrEnd > j, bytes[attrEnd - 1] != slash { metaName = name; metaTextStart = k + 1 }
+                    if attrEnd > j, bytes[attrEnd - 1] != slash {
+                        metaName = name
+                        metaCarriedText = []
+                        metaTextStart = k + 1
+                    }
                 }
 
                 i = k + 1
             }
+
+            // Metadata text running on into the next chunk.
+            if metaName != nil, metaTextStart < n {
+                metaCarriedText.append(contentsOf: UnsafeBufferPointer(rebasing: bytes[metaTextStart..<n]))
+            }
         }
-        return true
     }
 
     /// Minimal XML entity decode for metadata text (not in the hot path).

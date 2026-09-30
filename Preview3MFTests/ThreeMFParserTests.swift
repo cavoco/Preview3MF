@@ -13,7 +13,9 @@ final class ThreeMFParserTests: XCTestCase {
             let data: Data
         }
 
-        static func createArchive(entries: [Entry], deflate: Bool = false) -> Data {
+        /// `zip64Sentinels` writes sizes the way some slicers do: 0xFFFFFFFF in the headers,
+        /// with the real values in a ZIP64 extra field.
+        static func createArchive(entries: [Entry], deflate: Bool = false, zip64Sentinels: Bool = false) -> Data {
             var archive = Data()
             var centralDirectory = Data()
             var localOffsets: [UInt32] = []
@@ -22,6 +24,17 @@ final class ThreeMFParserTests: XCTestCase {
                 deflate ? (try! (entry.data as NSData).compressed(using: .zlib)) as Data : entry.data
             }
             let method: UInt16 = deflate ? 8 : 0
+            func sizes(_ i: Int) -> (compressed: UInt32, uncompressed: UInt32, extra: Data) {
+                guard zip64Sentinels else {
+                    return (UInt32(payloads[i].count), UInt32(entries[i].data.count), Data())
+                }
+                var extra = Data()
+                append16(&extra, 0x0001)    // ZIP64 extended information
+                append16(&extra, 16)
+                withUnsafeBytes(of: UInt64(entries[i].data.count).littleEndian) { extra.append(contentsOf: $0) }
+                withUnsafeBytes(of: UInt64(payloads[i].count).littleEndian) { extra.append(contentsOf: $0) }
+                return (0xFFFF_FFFF, 0xFFFF_FFFF, extra)
+            }
 
             for (i, entry) in entries.enumerated() {
                 localOffsets.append(UInt32(archive.count))
@@ -36,11 +49,13 @@ final class ThreeMFParserTests: XCTestCase {
                 append16(&archive, 0)           // mod time
                 append16(&archive, 0)           // mod date
                 append32(&archive, crc)
-                append32(&archive, UInt32(payloads[i].count))   // compressed size
-                append32(&archive, UInt32(entry.data.count))    // uncompressed size
+                let size = sizes(i)
+                append32(&archive, size.compressed)
+                append32(&archive, size.uncompressed)
                 append16(&archive, UInt16(nameData.count))
-                append16(&archive, 0)           // extra field length
+                append16(&archive, UInt16(size.extra.count))
                 archive.append(nameData)
+                archive.append(size.extra)
                 archive.append(payloads[i])
             }
 
@@ -59,16 +74,18 @@ final class ThreeMFParserTests: XCTestCase {
                 append16(&centralDirectory, 0)   // mod time
                 append16(&centralDirectory, 0)   // mod date
                 append32(&centralDirectory, crc)
-                append32(&centralDirectory, UInt32(payloads[i].count))
-                append32(&centralDirectory, UInt32(entry.data.count))
+                let size = sizes(i)
+                append32(&centralDirectory, size.compressed)
+                append32(&centralDirectory, size.uncompressed)
                 append16(&centralDirectory, UInt16(nameData.count))
-                append16(&centralDirectory, 0)   // extra field length
+                append16(&centralDirectory, UInt16(size.extra.count))
                 append16(&centralDirectory, 0)   // comment length
                 append16(&centralDirectory, 0)   // disk number
                 append16(&centralDirectory, 0)   // internal attrs
                 append32(&centralDirectory, 0)   // external attrs
                 append32(&centralDirectory, localOffsets[i])
                 centralDirectory.append(nameData)
+                centralDirectory.append(size.extra)
             }
 
             let cdSize = UInt32(centralDirectory.count)
@@ -339,6 +356,37 @@ final class ThreeMFParserTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         // Pre-fix this would read out of bounds; it must simply throw instead.
         XCTAssertThrowsError(try ThreeMFParser.parse(fileAt: url))
+    }
+
+    func testZIP64SentinelSizesAreRead() throws {
+        // Such packages go through the in-memory patch rather than being read from disk;
+        // both a plain and a multi-file plate project must come out whole.
+        let triangle = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        for deflate in [false, true] {
+            let plain = try parseArchive(MiniZIP.createArchive(
+                entries: [.init(path: "3D/3dmodel.model", data: triangle)],
+                deflate: deflate, zip64Sentinels: true
+            ))
+            XCTAssertEqual(plain.totalTriangles, 1)
+        }
+
+        let plates = MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: makeProductionRoot([
+                (101, "/3D/Objects/a.model", 1), (102, "/3D/Objects/b.model", 2),
+            ])),
+            .init(path: "3D/Objects/a.model", data: makePartFile(objectID: 1, triangles: 3)),
+            .init(path: "3D/Objects/b.model", data: makePartFile(objectID: 2, triangles: 5)),
+            .init(path: "Metadata/model_settings.config", data: Data("""
+                <config><plate><model_instance><metadata key="object_id" value="101"/></model_instance></plate>\
+                <plate><model_instance><metadata key="object_id" value="102"/></model_instance></plate></config>
+                """.utf8)),
+        ], deflate: true, zip64Sentinels: true)
+        let result = try parseArchive(plates)
+        XCTAssertEqual(result.totalTriangles, 3)
+        XCTAssertEqual(try result.loadingPlate(1)?.totalTriangles, 5)
     }
 
     func testParseCube() throws {
@@ -1148,6 +1196,52 @@ final class ThreeMFParserTests: XCTestCase {
             plates: [[2]]
         ))
         XCTAssertEqual(result.plates.map(\.modelPaths), [["3D/3dmodel.model"]])
+    }
+
+    // MARK: - Streaming
+
+    func testParsingInChunksMatchesParsingWhole() throws {
+        // Chunk boundaries can fall anywhere: inside a tag, a number, or metadata text —
+        // which may even hold a bare '>', where the scanner stops a chunk short.
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        xml += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\""
+        xml += " xmlns:p=\"http://schemas.microsoft.com/3dmanufacturing/production/2015/06\">"
+        xml += "<metadata name=\"Title\">Tall &amp; thin: height > width</metadata>"
+        xml += "<metadata name=\"Designer\">  Someone  </metadata><metadata name=\"Empty\"/>"
+        xml += "<resources><basematerials id=\"5\"><base displaycolor=\"#FF0000\"/><base displaycolor=\"#00FF00\"/></basematerials>"
+        xml += "<object id=\"1\" type=\"model\"><mesh><vertices>"
+        for v in 0..<40 { xml += "<vertex x=\"\(Float(v) * 1.25)\" y=\"-\(v).5e-1\" z=\"\(v % 3)\"/>" }
+        xml += "</vertices><triangles>"
+        for t in 0..<38 { xml += "<triangle v1=\"\(t)\" v2=\"\(t + 1)\" v3=\"\(t + 2)\" pid=\"5\" p1=\"\(t % 2)\"/>" }
+        xml += "</triangles></mesh></object>"
+        xml += "<object id=\"2\" type=\"model\"><components>"
+        xml += "<component p:path=\"/3D/Objects/part.model\" objectid=\"9\" transform=\"1 0 0 0 1 0 0 0 1 4 5 6\"/>"
+        xml += "</components></object></resources>"
+        xml += "<build><item objectid=\"2\"/><item objectid=\"1\" transform=\"1 0 0 0 1 0 0 0 1 0 0 2\"/></build></model>"
+        let data = Data(xml.utf8)
+
+        let whole = FastModelParser()
+        _ = whole.parse(data)
+
+        for size in [1, 2, 7, 64, 1000] {
+            let chunked = FastModelParser()
+            var offset = 0
+            while offset < data.count {
+                chunked.feed(data.subdata(in: offset..<min(offset + size, data.count)))
+                offset += size
+            }
+            XCTAssertEqual(chunked.metadata, whole.metadata, "chunk size \(size)")
+            XCTAssertEqual(chunked.metadata["Title"], "Tall & thin: height > width")
+            XCTAssertEqual(chunked.objects[1]?.vertices, whole.objects[1]?.vertices, "chunk size \(size)")
+            XCTAssertEqual(chunked.objects[1]?.triangles.count, 38)
+            XCTAssertEqual(
+                chunked.objects[1]?.triangleColors?.map { [$0.0, $0.1, $0.2] },
+                whole.objects[1]?.triangleColors?.map { [$0.0, $0.1, $0.2] }
+            )
+            XCTAssertEqual(chunked.objects[2]?.components.first?.path, "3D/Objects/part.model")
+            XCTAssertEqual(chunked.objects[2]?.components.first?.transform, whole.objects[2]?.components.first?.transform)
+            XCTAssertEqual(chunked.buildItems.map(\.objectID), [2, 1])
+        }
     }
 
     // MARK: - Lazy Plate Loading
@@ -2060,8 +2154,9 @@ final class ThreeMFParserTests: XCTestCase {
         let four = try XCTUnwrap(measurements[4]).heapPeakMB
         report(String(format: "[benchmark] 4-plate / 1-plate heap peak ratio: %.2f", four / max(one, 0.1)))
         // Only the shown plate is parsed, so more plates shouldn't cost more to open. Before
-        // plates loaded lazily this ratio was 3.4.
-        XCTAssertLessThan(four / max(one, 0.1), 1.5)
+        // plates loaded lazily this ratio was 3.4. Opening is now cheap enough (~10 MB) that
+        // sampling noise matters, hence the absolute allowance.
+        XCTAssertLessThan(four, one * 1.5 + 5)
     }
 
     /// Runs against a real, large project when one is to hand: the file named by
