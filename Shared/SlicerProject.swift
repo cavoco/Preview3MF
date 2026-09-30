@@ -110,7 +110,7 @@ struct SlicerProject {
             return []
         }
         // A slot we cannot parse still has to occupy its index, or every later slot shifts.
-        return raw.map { ModelXMLDelegate.parseDisplayColor($0) ?? SIMD4<Float>(0.75, 0.75, 0.75, 1.0) }
+        return raw.map { FastModelParser.parseDisplayColor($0) ?? SIMD4<Float>(0.75, 0.75, 0.75, 1.0) }
     }
 }
 
@@ -392,7 +392,7 @@ final class SliceInfoDelegate: NSObject, XMLParserDelegate {
             current.filaments.append(SliceEstimate.FilamentUsage(
                 slot: slot,
                 type: attributes["type"].flatMap { $0.isEmpty ? nil : $0 },
-                color: attributes["color"].flatMap(ModelXMLDelegate.parseDisplayColor),
+                color: attributes["color"].flatMap(FastModelParser.parseDisplayColor),
                 grams: grams
             ))
         default:

@@ -1543,13 +1543,13 @@ final class ThreeMFParserTests: XCTestCase {
     // MARK: - Transform Parsing
 
     func testParseTransformIdentity() {
-        let t = ModelXMLDelegate.parseTransform("1 0 0 0 1 0 0 0 1 0 0 0")
+        let t = FastModelParser.parseTransform("1 0 0 0 1 0 0 0 1 0 0 0")
         XCTAssertEqual(t, matrix_identity_float4x4)
     }
 
     func testParseTransformInvalid() {
         // Too few values → should return identity
-        let t = ModelXMLDelegate.parseTransform("1 0 0")
+        let t = FastModelParser.parseTransform("1 0 0")
         XCTAssertEqual(t, matrix_identity_float4x4)
     }
 

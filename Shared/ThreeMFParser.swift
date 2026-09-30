@@ -649,219 +649,8 @@ struct ObjectReference {
     }
 }
 
-final class ModelXMLDelegate: NSObject, XMLParserDelegate {
-    /// Objects keyed by their `id` attribute.
-    var objects: [Int: ParsedObject] = [:]
-    /// Build items parsed from `<build><item>`.
-    var buildItems: [ObjectReference] = []
-    /// Metadata entries keyed by name (e.g. "Title", "Designer").
-    var metadata: [String: String] = [:]
-
-    // Material groups: keyed by basematerials group id
-    private var materialGroups: [Int: [SIMD4<Float>]] = [:]
-    private var currentGroupID: Int?
-    private var currentGroupColors: [SIMD4<Float>] = []
-
-    // Current object tracking
-    private var currentObjectID: Int?
-    private var currentVertices: [SIMD3<Float>] = []
-    private var currentTriangles: [(UInt32, UInt32, UInt32)] = []
-    private var currentTriangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
-    private var currentComponents: [ObjectReference] = []
-
-    // Object-level default material
-    private var objectPID: Int?
-    private var objectPIndex: Int?
-
-    // Metadata tracking
-    private var currentMetadataName: String?
-    private var currentMetadataText: String?
-
-    private var inBuild = false
-
-    private let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
-
-    func parser(
-        _ parser: XMLParser,
-        didStartElement elementName: String,
-        namespaceURI: String?,
-        qualifiedName: String?,
-        attributes: [String: String]
-    ) {
-        switch elementName {
-        case "basematerials":
-            if let idStr = attributes["id"], let id = Int(idStr) {
-                currentGroupID = id
-                currentGroupColors = []
-            }
-
-        case "base":
-            if let colorStr = attributes["displaycolor"],
-               let color = Self.parseDisplayColor(colorStr) {
-                currentGroupColors.append(color)
-            }
-
-        case "object":
-            if let idStr = attributes["id"], let id = Int(idStr) {
-                currentObjectID = id
-                currentVertices = []
-                currentTriangles = []
-                currentTriangleColors = nil
-                currentComponents = []
-            }
-            if let pidStr = attributes["pid"], let pid = Int(pidStr) {
-                objectPID = pid
-            }
-            if let pindexStr = attributes["pindex"], let pindex = Int(pindexStr) {
-                objectPIndex = pindex
-            }
-
-        case "vertex":
-            guard
-                let xStr = attributes["x"], let x = Float(xStr),
-                let yStr = attributes["y"], let y = Float(yStr),
-                let zStr = attributes["z"], let z = Float(zStr)
-            else { return }
-            currentVertices.append(SIMD3<Float>(x, y, z))
-
-        case "triangle":
-            guard
-                let v1Str = attributes["v1"], let v1 = UInt32(v1Str),
-                let v2Str = attributes["v2"], let v2 = UInt32(v2Str),
-                let v3Str = attributes["v3"], let v3 = UInt32(v3Str)
-            else { return }
-            currentTriangles.append((v1, v2, v3))
-
-            // Only track colors if this file has material definitions
-            guard !materialGroups.isEmpty else { break }
-
-            // Backfill previous triangles with default gray if this is the first color entry
-            if currentTriangleColors == nil {
-                currentTriangleColors = Array(repeating: (defaultGray, defaultGray, defaultGray),
-                                              count: currentTriangles.count - 1)
-            }
-
-            // Resolve colors for this triangle
-            let triPID = attributes["pid"].flatMap { Int($0) } ?? objectPID
-            let c0: SIMD4<Float>
-            let c1: SIMD4<Float>
-            let c2: SIMD4<Float>
-
-            if let pid = triPID, let group = materialGroups[pid] {
-                let p1 = attributes["p1"].flatMap { Int($0) } ?? objectPIndex
-                let p2 = attributes["p2"].flatMap { Int($0) } ?? p1
-                let p3 = attributes["p3"].flatMap { Int($0) } ?? p1
-
-                c0 = (p1 != nil && p1! < group.count) ? group[p1!] : defaultGray
-                c1 = (p2 != nil && p2! < group.count) ? group[p2!] : defaultGray
-                c2 = (p3 != nil && p3! < group.count) ? group[p3!] : defaultGray
-            } else {
-                c0 = defaultGray
-                c1 = defaultGray
-                c2 = defaultGray
-            }
-
-            currentTriangleColors!.append((c0, c1, c2))
-
-        case "component":
-            // A reference, inside an object's <components>, to another object by id.
-            guard currentObjectID != nil,
-                  let idStr = attributes["objectid"],
-                  let objectID = Int(idStr)
-            else { break }
-            let transform = attributes["transform"].map(Self.parseTransform) ?? matrix_identity_float4x4
-            currentComponents.append(ObjectReference(
-                objectID: objectID,
-                path: attributes["p:path"].map(ObjectReference.normalizedPath),
-                transform: transform
-            ))
-
-        case "metadata":
-            if let name = attributes["name"] {
-                currentMetadataName = name
-                currentMetadataText = ""
-            }
-
-        case "build":
-            inBuild = true
-
-        case "item":
-            guard inBuild,
-                  let idStr = attributes["objectid"],
-                  let objectID = Int(idStr)
-            else { break }
-
-            let transform: simd_float4x4
-            if let transformStr = attributes["transform"] {
-                transform = Self.parseTransform(transformStr)
-            } else {
-                transform = matrix_identity_float4x4
-            }
-            buildItems.append(ObjectReference(
-                objectID: objectID,
-                path: attributes["p:path"].map(ObjectReference.normalizedPath),
-                transform: transform
-            ))
-
-        default:
-            break
-        }
-    }
-
-    func parser(
-        _ parser: XMLParser,
-        didEndElement elementName: String,
-        namespaceURI: String?,
-        qualifiedName: String?
-    ) {
-        switch elementName {
-        case "basematerials":
-            if let id = currentGroupID {
-                materialGroups[id] = currentGroupColors
-            }
-            currentGroupID = nil
-            currentGroupColors = []
-
-        case "object":
-            if let id = currentObjectID {
-                objects[id] = ParsedObject(
-                    vertices: currentVertices,
-                    triangles: currentTriangles,
-                    triangleColors: currentTriangleColors,
-                    components: currentComponents
-                )
-            }
-            currentObjectID = nil
-            currentVertices = []
-            currentTriangles = []
-            currentTriangleColors = nil
-            currentComponents = []
-            objectPID = nil
-            objectPIndex = nil
-
-        case "metadata":
-            if let name = currentMetadataName,
-               let text = currentMetadataText?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !text.isEmpty {
-                metadata[name] = text
-            }
-            currentMetadataName = nil
-            currentMetadataText = nil
-
-        case "build":
-            inBuild = false
-
-        default:
-            break
-        }
-    }
-
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        if currentMetadataName != nil {
-            currentMetadataText?.append(string)
-        }
-    }
-
+/// Attribute parsing shared with the slicer sidecar readers.
+extension FastModelParser {
     /// Parse a 3MF `transform` attribute (12 space-separated floats) into a 4x4 matrix.
     /// Format: "m00 m01 m02 m10 m11 m12 m20 m21 m22 m30 m31 m32".
     ///
@@ -908,8 +697,7 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
     }
 }
 
-/// A hand-written scanner for 3MF `<model>` XML that produces the same output as
-/// `ModelXMLDelegate` but far faster on large files.
+/// A hand-written scanner for 3MF `<model>` XML.
 ///
 /// Foundation's `XMLParser` builds a bridged `[String: String]` attribute dictionary
 /// for every element; with millions of `<vertex>`/`<triangle>` elements that allocation
@@ -1105,7 +893,7 @@ final class FastModelParser {
                         var transform = matrix_identity_float4x4
                         forEachAttr(j, attrEnd) { an, al, vs in
                             if nameIs(an, al, "objectid") { objectID = d(vs) }
-                            else if nameIs(an, al, "transform") { transform = ModelXMLDelegate.parseTransform(str(vs, valueEnd(vs))) }
+                            else if nameIs(an, al, "transform") { transform = Self.parseTransform(str(vs, valueEnd(vs))) }
                             else if isPathAttribute(an, al) { path = ObjectReference.normalizedPath(str(vs, valueEnd(vs))) }
                         }
                         if let objectID {
@@ -1118,7 +906,7 @@ final class FastModelParser {
                 } else if nameIs(ns, nl, "base") {
                     forEachAttr(j, attrEnd) { an, al, vs in
                         if nameIs(an, al, "displaycolor"),
-                           let color = ModelXMLDelegate.parseDisplayColor(str(vs, valueEnd(vs))) {
+                           let color = Self.parseDisplayColor(str(vs, valueEnd(vs))) {
                             currentGroupColors.append(color)
                         }
                     }
@@ -1139,7 +927,7 @@ final class FastModelParser {
                 } else if nameIs(ns, nl, "color"), currentGroupID != nil {
                     forEachAttr(j, attrEnd) { an, al, vs in
                         if nameIs(an, al, "color"),
-                           let color = ModelXMLDelegate.parseDisplayColor(str(vs, valueEnd(vs))) {
+                           let color = Self.parseDisplayColor(str(vs, valueEnd(vs))) {
                             currentGroupColors.append(color)
                         }
                     }
