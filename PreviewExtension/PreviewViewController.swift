@@ -8,11 +8,18 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private var infoLabel: NSTextField!
     private var plateControl: NSStackView!
     private var plateLabel: NSTextField!
+    private var plateSpinner: NSProgressIndicator!
     private var viewControl: NSStackView!
     private var spinButton: NSButton!
     private var result: ParseResult?
     /// Survives paging, which swaps in a freshly built (spinning) scene.
     private var isSpinning = true
+    /// The plate paging is heading for while its model files load; nil once it's shown.
+    private var targetPlate: Int?
+    private var isLoadingPlate = false
+    /// Bumped per file, so a plate load that finishes after another file opened is dropped.
+    private var fileGeneration = 0
+    private let plateLoadQueue = DispatchQueue(label: "Preview3MF.plate-loading", qos: .userInitiated)
 
     override var nibName: NSNib.Name? { nil }
 
@@ -45,9 +52,16 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         plateLabel.font = .systemFont(ofSize: 11, weight: .medium)
         plateLabel.alignment = .center
 
+        plateSpinner = NSProgressIndicator()
+        plateSpinner.style = .spinning
+        plateSpinner.controlSize = .small
+        plateSpinner.isDisplayedWhenStopped = false
+        plateSpinner.isHidden = true
+
         plateControl = NSStackView(views: [
             overlayButton("chevron.left", "Previous plate", #selector(previousPlate)),
             plateLabel,
+            plateSpinner,
             overlayButton("chevron.right", "Next plate", #selector(nextPlate)),
         ])
         styleOverlay(plateControl)
@@ -118,15 +132,50 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     /// Page to the next plate that actually holds geometry, wrapping at the ends. Plates the
     /// slicer left empty stay in the numbering but are skipped over.
     private func stepPlate(_ delta: Int) {
-        guard let result, result.plateCount > 1, let current = result.plateIndex else { return }
+        guard let result, result.plateCount > 1, let current = targetPlate ?? result.plateIndex else { return }
         var next = current
         for _ in 0..<result.plateCount {
             next = (next + delta + result.plateCount) % result.plateCount
-            if !result.plates[next].items.isEmpty { break }
+            if result.plates[next].hasGeometry { break }
         }
-        guard next != current, let updated = result.showingPlate(next) else { return }
-        self.result = updated
-        render(updated, animated: false)
+        guard next != current else { return }
+        targetPlate = next
+        plateLabel.stringValue = plateLabelText(result, index: next)
+        showTargetPlate(from: result)
+    }
+
+    /// Show `targetPlate`, first parsing its model files off the main thread if they aren't
+    /// loaded — a big plate takes seconds. Clicks that land mid-load only move the target;
+    /// whichever plate it ends on is loaded next and shown.
+    private func showTargetPlate(from base: ParseResult) {
+        guard !isLoadingPlate, let target = targetPlate else { return }
+        if base.plates[target].isLoaded, let updated = base.showingPlate(target) {
+            targetPlate = nil
+            result = updated
+            render(updated, animated: false)
+            return
+        }
+
+        isLoadingPlate = true
+        plateSpinner.isHidden = false
+        plateSpinner.startAnimation(nil)
+        let generation = fileGeneration
+        plateLoadQueue.async { [weak self] in
+            let loaded = try? base.loadingPlate(target)
+            DispatchQueue.main.async {
+                guard let self, generation == self.fileGeneration else { return }
+                self.isLoadingPlate = false
+                self.plateSpinner.stopAnimation(nil)
+                self.plateSpinner.isHidden = true
+                if let loaded {
+                    self.showTargetPlate(from: loaded)
+                } else if let result = self.result {
+                    // Stay on the plate already on screen.
+                    self.targetPlate = nil
+                    self.plateLabel.stringValue = self.plateLabelText(result)
+                }
+            }
+        }
     }
 
     private var currentAppearance: SceneBuilder.Appearance {
@@ -135,6 +184,11 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     }
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
+        fileGeneration += 1
+        targetPlate = nil
+        isLoadingPlate = false
+        plateSpinner.stopAnimation(nil)
+        plateSpinner.isHidden = true
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             self.result = result
@@ -162,7 +216,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         spinButton.contentTintColor = foreground
 
         // Only worth showing when there is somewhere to page to.
-        let populated = result.plates.filter { !$0.items.isEmpty }.count
+        let populated = result.plates.filter { $0.hasGeometry }.count
         plateControl.isHidden = populated < 2
         plateLabel.stringValue = plateLabelText(result)
 
@@ -192,8 +246,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
     }
 
-    private func plateLabelText(_ result: ParseResult) -> String {
-        guard let index = result.plateIndex else { return "" }
+    private func plateLabelText(_ result: ParseResult, index: Int? = nil) -> String {
+        guard let index = index ?? result.plateIndex else { return "" }
         let counter = "Plate \(index + 1)/\(result.plateCount)"
         if let name = result.plates[index].name, !name.isEmpty {
             return "\(counter) · \(name)"

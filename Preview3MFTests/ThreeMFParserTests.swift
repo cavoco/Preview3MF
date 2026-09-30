@@ -6,38 +6,42 @@ final class ThreeMFParserTests: XCTestCase {
 
     // MARK: - MiniZIP Helper
 
-    /// Builds a minimal stored (uncompressed) ZIP archive in memory.
+    /// Builds a minimal ZIP archive in memory, stored (uncompressed) unless asked to deflate.
     private struct MiniZIP {
         struct Entry {
             let path: String
             let data: Data
         }
 
-        static func createArchive(entries: [Entry]) -> Data {
+        static func createArchive(entries: [Entry], deflate: Bool = false) -> Data {
             var archive = Data()
             var centralDirectory = Data()
             var localOffsets: [UInt32] = []
+            // Foundation's zlib is raw DEFLATE, which is what ZIP method 8 holds.
+            let payloads = entries.map { entry in
+                deflate ? (try! (entry.data as NSData).compressed(using: .zlib)) as Data : entry.data
+            }
+            let method: UInt16 = deflate ? 8 : 0
 
-            for entry in entries {
+            for (i, entry) in entries.enumerated() {
                 localOffsets.append(UInt32(archive.count))
                 let nameData = Data(entry.path.utf8)
                 let crc = crc32(entry.data)
-                let size = UInt32(entry.data.count)
 
                 // Local file header
                 append32(&archive, 0x04034B50)
                 append16(&archive, 20)          // version needed
                 append16(&archive, 0)           // flags
-                append16(&archive, 0)           // compression: stored
+                append16(&archive, method)      // compression
                 append16(&archive, 0)           // mod time
                 append16(&archive, 0)           // mod date
                 append32(&archive, crc)
-                append32(&archive, size)        // compressed size
-                append32(&archive, size)        // uncompressed size
+                append32(&archive, UInt32(payloads[i].count))   // compressed size
+                append32(&archive, UInt32(entry.data.count))    // uncompressed size
                 append16(&archive, UInt16(nameData.count))
                 append16(&archive, 0)           // extra field length
                 archive.append(nameData)
-                archive.append(entry.data)
+                archive.append(payloads[i])
             }
 
             let cdOffset = UInt32(archive.count)
@@ -45,19 +49,18 @@ final class ThreeMFParserTests: XCTestCase {
             for (i, entry) in entries.enumerated() {
                 let nameData = Data(entry.path.utf8)
                 let crc = crc32(entry.data)
-                let size = UInt32(entry.data.count)
 
                 // Central directory entry
                 append32(&centralDirectory, 0x02014B50)
                 append16(&centralDirectory, 20)  // version made by
                 append16(&centralDirectory, 20)  // version needed
                 append16(&centralDirectory, 0)   // flags
-                append16(&centralDirectory, 0)   // compression
+                append16(&centralDirectory, method)
                 append16(&centralDirectory, 0)   // mod time
                 append16(&centralDirectory, 0)   // mod date
                 append32(&centralDirectory, crc)
-                append32(&centralDirectory, size)
-                append32(&centralDirectory, size)
+                append32(&centralDirectory, UInt32(payloads[i].count))
+                append32(&centralDirectory, UInt32(entry.data.count))
                 append16(&centralDirectory, UInt16(nameData.count))
                 append16(&centralDirectory, 0)   // extra field length
                 append16(&centralDirectory, 0)   // comment length
@@ -1144,6 +1147,113 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(result.plates.map(\.modelPaths), [["3D/3dmodel.model"]])
     }
 
+    // MARK: - Lazy Plate Loading
+
+    /// A slicer project from explicit parts: `makeProductionRoot` containers, each on the
+    /// plate listed for it, plus whatever part files the test supplies.
+    private func makePlateProject(
+        root: [(containerID: Int, path: String?, objectID: Int)],
+        files: [String: Data],
+        plates: [[Int]]
+    ) -> Data {
+        var config = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config>"
+        for (index, plate) in plates.enumerated() {
+            config += "<plate><metadata key=\"plater_id\" value=\"\(index + 1)\"/>"
+            for objectID in plate {
+                config += "<model_instance><metadata key=\"object_id\" value=\"\(objectID)\"/></model_instance>"
+            }
+            config += "</plate>"
+        }
+        config += "</config>"
+        var entries: [MiniZIP.Entry] = [.init(path: "3D/3dmodel.model", data: makeProductionRoot(root))]
+        entries += files.keys.sorted().map { .init(path: $0, data: files[$0]!) }
+        entries.append(.init(path: "Metadata/model_settings.config", data: Data(config.utf8)))
+        return MiniZIP.createArchive(entries: entries)
+    }
+
+    /// A part file holding one object: a mesh of `triangles` triangles, or none at all.
+    private func makePartFile(objectID: Int, triangles: Int) -> Data {
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        xml += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\"><resources>"
+        xml += "<object id=\"\(objectID)\" type=\"model\"><mesh><vertices>"
+        if triangles > 0 {
+            for v in 0..<(triangles + 2) { xml += "<vertex x=\"\(v)\" y=\"\(v % 2)\" z=\"0\"/>" }
+        }
+        xml += "</vertices><triangles>"
+        for t in 0..<triangles { xml += "<triangle v1=\"\(t)\" v2=\"\(t + 1)\" v3=\"\(t + 2)\"/>" }
+        xml += "</triangles></mesh></object></resources><build/></model>"
+        return Data(xml.utf8)
+    }
+
+    func testOnlyTheShownPlateIsLoaded() throws {
+        let result = try parseArchive(makeMultiPlateProject(plates: 3, trianglesPerPlate: 5))
+        XCTAssertEqual(result.plateIndex, 0)
+        XCTAssertEqual(result.plates.map(\.isLoaded), [true, false, false])
+        XCTAssertEqual(result.plates.map(\.items.count), [1, 0, 0])
+        // Unloaded plates still count for paging, and already know their files.
+        XCTAssertEqual(result.plates.map(\.hasGeometry), [true, true, true])
+        XCTAssertEqual(result.plates[2].modelPaths, ["3D/3dmodel.model", "3D/Objects/object_3.model"])
+        XCTAssertNotNil(result.package)
+    }
+
+    func testLoadingAPlateUnloadsTheOneBefore() throws {
+        let result = try parseArchive(makeMultiPlateProject(plates: 3, trianglesPerPlate: 5))
+
+        let third = try XCTUnwrap(result.loadingPlate(2))
+        XCTAssertEqual(third.plateIndex, 2)
+        XCTAssertEqual(third.totalTriangles, 5)
+        XCTAssertEqual(third.plates.map(\.isLoaded), [false, false, true])
+        // Plate 3's mesh sits at z = 3 in the fixture, so this is plate 3's geometry.
+        XCTAssertEqual(third.items.first?.mesh.vertices.first?.z, 3)
+
+        let back = try XCTUnwrap(third.loadingPlate(0))
+        XCTAssertEqual(back.totalTriangles, 5)
+        XCTAssertEqual(back.items.first?.mesh.vertices.first?.z, 1)
+        XCTAssertEqual(back.plates.map(\.isLoaded), [true, false, false])
+    }
+
+    func testFirstPlateThatTurnsOutEmptyIsSkippedAndRemembered() throws {
+        // Plate 1 references a real file, so it can't be ruled out until parsed — and then
+        // holds no mesh. Plate 2 should open, and paging should still skip plate 1.
+        let result = try parseArchive(makePlateProject(
+            root: [(101, "/3D/Objects/a.model", 1), (102, "/3D/Objects/b.model", 2)],
+            files: [
+                "3D/Objects/a.model": makePartFile(objectID: 1, triangles: 0),
+                "3D/Objects/b.model": makePartFile(objectID: 2, triangles: 4),
+            ],
+            plates: [[101], [102]]
+        ))
+        XCTAssertEqual(result.plateIndex, 1)
+        XCTAssertEqual(result.totalTriangles, 4)
+        XCTAssertFalse(result.plates[0].isLoaded)
+        XCTAssertFalse(result.plates[0].hasGeometry)
+    }
+
+    func testPlateWithUnnamedCrossFileReferenceLoadsEverything() throws {
+        // The component names no file and its id isn't in the root, so there is no telling
+        // which file holds it without parsing them all.
+        let result = try parseArchive(makePlateProject(
+            root: [(101, nil, 7)],
+            files: ["3D/Objects/part.model": makePartFile(objectID: 7, triangles: 3)],
+            plates: [[101]]
+        ))
+        XCTAssertEqual(result.plateIndex, 0)
+        XCTAssertEqual(result.totalTriangles, 3)
+        XCTAssertTrue(result.plates[0].isLoaded)
+    }
+
+    func testSingleFileProjectLoadsEveryPlateUpFront() throws {
+        // Everything is in the root model, so every plate is complete as soon as it's parsed.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [1]), (id: 4, extruder: 1, components: [3])],
+            meshes: [1, 3],
+            plates: [[2], [4]]
+        ))
+        XCTAssertEqual(result.plates.map(\.isLoaded), [true, true])
+        XCTAssertEqual(result.plates[1].items.count, 1)
+    }
+
     func testAllPlatesAreAvailableForPaging() throws {
         // The other plates must survive parsing, or there is nothing to page to.
         let result = try parseArchive(makeSlicerProjectArchive(
@@ -1762,7 +1872,7 @@ final class ThreeMFParserTests: XCTestCase {
     /// live in per-object files under `3D/Objects/`, referenced by `p:path`, one container
     /// per plate. Every plate carries the same triangle count, so a result can be checked
     /// against a single plate's worth of geometry.
-    private func makeMultiPlateProject(plates: Int, trianglesPerPlate: Int) -> Data {
+    private func makeMultiPlateProject(plates: Int, trianglesPerPlate: Int, deflate: Bool = false) -> Data {
         var root = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
         root += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\""
         root += " xmlns:p=\"http://schemas.microsoft.com/3dmanufacturing/production/2015/06\""
@@ -1809,7 +1919,7 @@ final class ThreeMFParserTests: XCTestCase {
 
         entries.insert(.init(path: "3D/3dmodel.model", data: Data(root.utf8)), at: 0)
         entries.append(.init(path: "Metadata/model_settings.config", data: Data(config.utf8)))
-        return MiniZIP.createArchive(entries: entries)
+        return MiniZIP.createArchive(entries: entries, deflate: deflate)
     }
 
     /// Current physical footprint — the figure the system's memory limits are judged on.
@@ -1848,11 +1958,15 @@ final class ThreeMFParserTests: XCTestCase {
         var footprintPeakMB: Double { Double(footprintPeakBytes) / 1_048_576 }
     }
 
-    /// Parses `url` once, sampling memory every millisecond on a background thread. The
+    private func measureParse(of url: URL) throws -> ParseMeasurement {
+        try measure { try ThreeMFParser.parse(fileAt: url) }
+    }
+
+    /// Runs `work` once, sampling memory every millisecond on a background thread. The
     /// kernel's own peak counter can't be reset, so sampling is what lets one test compare
     /// two parses. The parser's large buffers live for tens of milliseconds at least, so a
     /// 1 ms interval sees them.
-    private func measureParse(of url: URL) throws -> ParseMeasurement {
+    private func measure(_ work: () throws -> ParseResult) throws -> ParseMeasurement {
         malloc_zone_pressure_relief(nil, 0)
         let heapBaseline = Self.heapInUse()
         let footprintBaseline = Self.physFootprint()
@@ -1879,7 +1993,7 @@ final class ThreeMFParserTests: XCTestCase {
         sampler.start()
 
         let start = Date()
-        let result = try ThreeMFParser.parse(fileAt: url)
+        let result = try work()
         let seconds = Date().timeIntervalSince(start)
 
         sample()
@@ -1918,7 +2032,9 @@ final class ThreeMFParserTests: XCTestCase {
         var urls: [Int: URL] = [:]
         for plates in plateCounts {
             urls[plates] = try autoreleasepool {
-                try writeTempFile(makeMultiPlateProject(plates: plates, trianglesPerPlate: trianglesPerPlate))
+                // Deflated, as slicers write them: a stored archive is several times the size
+                // and the parser holds the archive in memory, which would swamp the comparison.
+                try writeTempFile(makeMultiPlateProject(plates: plates, trianglesPerPlate: trianglesPerPlate, deflate: true))
             }
         }
         defer { urls.values.forEach { try? FileManager.default.removeItem(at: $0) } }
@@ -1932,7 +2048,7 @@ final class ThreeMFParserTests: XCTestCase {
             XCTAssertEqual(m.result.plateIndex, 0)
             XCTAssertEqual(m.result.totalTriangles, trianglesPerPlate, "only the first plate should be shown")
             // Paging must still reach the last plate's full geometry.
-            let last = try XCTUnwrap(m.result.showingPlate(plates - 1))
+            let last = try XCTUnwrap(m.result.loadingPlate(plates - 1))
             XCTAssertEqual(last.totalTriangles, trianglesPerPlate)
             measurements[plates] = m
         }
@@ -1940,6 +2056,9 @@ final class ThreeMFParserTests: XCTestCase {
         let one = try XCTUnwrap(measurements[1]).heapPeakMB
         let four = try XCTUnwrap(measurements[4]).heapPeakMB
         report(String(format: "[benchmark] 4-plate / 1-plate heap peak ratio: %.2f", four / max(one, 0.1)))
+        // Only the shown plate is parsed, so more plates shouldn't cost more to open. Before
+        // plates loaded lazily this ratio was 3.4.
+        XCTAssertLessThan(four / max(one, 0.1), 1.5)
     }
 
     /// Runs against a real, large project when one is to hand: the file named by
@@ -1962,8 +2081,12 @@ final class ThreeMFParserTests: XCTestCase {
         let m = try measureParse(of: url)
         log(url.lastPathComponent, m)
         XCTAssertGreaterThan(m.result.totalTriangles, 0)
-        for (index, plate) in m.result.plates.enumerated() {
-            report("[benchmark] \(url.lastPathComponent) plate \(index + 1): \(plate.modelPaths.count) model files")
+        var result = m.result
+        for index in result.plates.indices where result.plates[index].hasGeometry {
+            let page = try measure { try XCTUnwrap(result.loadingPlate(index)) }
+            log("\(url.lastPathComponent) paging to plate \(index + 1) (\(page.result.plates[index].modelPaths.count) model files)", page)
+            XCTAssertTrue(page.result.plates[index].isLoaded)
+            result = page.result
         }
     }
 }

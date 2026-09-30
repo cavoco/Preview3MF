@@ -33,6 +33,12 @@ struct PlateContents {
     /// Package paths of the model files holding this plate's geometry, sorted — the root
     /// model plus whichever `3D/Objects/*.model` files its objects reference.
     var modelPaths: [String] = []
+    /// False until the plate's model files are parsed; `items` stays empty until then.
+    /// Only the plate on screen is kept loaded in a multi-file slicer project.
+    var isLoaded = true
+    /// Whether the plate has anything to show. Exact once loaded; before that, a plate that
+    /// places anything at all counts, so paging doesn't skip over it.
+    var hasGeometry: Bool
 }
 
 struct ParseResult {
@@ -49,11 +55,24 @@ struct ParseResult {
     var printSettings: PrintSettings?
     /// The slicer's estimate for the plate being shown, if it has been sliced.
     var sliceEstimate: SliceEstimate?
+    /// The open package, kept for parsing plates that aren't loaded yet. Nil when every
+    /// plate was loaded up front.
+    var package: ThreeMFPackage?
 
     var plateCount: Int { plates.count }
 
-    /// The same result showing a different plate. Returns nil for an out-of-range index,
-    /// so callers can wrap or clamp as they prefer.
+    /// The same result showing a different plate, parsing that plate's model files first
+    /// if they aren't loaded — which can take seconds for a big plate, so call this off the
+    /// main thread. It may unload other plates, so page onward from the returned result.
+    /// Returns nil for an out-of-range index.
+    func loadingPlate(_ index: Int) throws -> ParseResult? {
+        guard plates.indices.contains(index) else { return nil }
+        guard !plates[index].isLoaded, let package else { return showingPlate(index) }
+        return try package.result(showingPlate: index)
+    }
+
+    /// The same result showing a different, already loaded plate. Returns nil for an
+    /// out-of-range index, so callers can wrap or clamp as they prefer.
     func showingPlate(_ index: Int) -> ParseResult? {
         guard plates.indices.contains(index) else { return nil }
         var copy = self
@@ -121,221 +140,10 @@ enum ThreeMFParserError: Error, LocalizedError {
 
 final class ThreeMFParser {
 
+    /// Parses a package for display. A multi-file slicer project only has its first
+    /// populated plate parsed; the rest load on demand through `ParseResult.loadingPlate`.
     static func parse(fileAt url: URL) throws -> ParseResult {
-        let archive = try openArchive(fileAt: url)
-        // Bambu/Orca keep colour, plate layout and boolean-part roles in their own files
-        // under Metadata/. Absent for spec-only 3MFs, in which case this is all no-ops.
-        let project = SlicerProject.read(from: archive)
-
-        // Collect all .model entries — mesh may be in 3D/3dmodel.model or 3D/Objects/*.model
-        var modelEntries: [Entry] = []
-        for entry in archive {
-            if entry.path.hasSuffix(".model") && entry.type == .file {
-                modelEntries.append(entry)
-            }
-        }
-        guard !modelEntries.isEmpty else {
-            throw ThreeMFParserError.modelEntryNotFound
-        }
-
-        // Parse all model files. Object ids are scoped to the file that defines them, so
-        // objects are keyed by (file, id): two files may both hold an object 1.
-        var allObjects: [ObjectKey: MeshData] = [:]
-        var allComponents: [ObjectKey: [ObjectReference]] = [:]
-        var buildReferences: [(reference: ObjectReference, file: String)] = []
-        var metadata = ModelMetadata()
-        let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
-
-        for entry in modelEntries {
-            var xmlData = Data()
-            _ = try archive.extract(entry) { chunk in
-                xmlData.append(chunk)
-            }
-
-            let delegate = FastModelParser()
-            guard delegate.parse(xmlData) else { continue }
-            let path = ObjectReference.normalizedPath(entry.path)
-
-            for (id, obj) in delegate.objects {
-                let key = ObjectKey(path: path, id: id)
-                if !obj.vertices.isEmpty {
-                    allObjects[key] = MeshData(
-                        vertices: obj.vertices,
-                        triangles: obj.triangles,
-                        triangleColors: obj.triangleColors
-                    )
-                }
-                // Retain assembly containers even though they carry no mesh of their own.
-                if !obj.components.isEmpty {
-                    allComponents[key] = obj.components
-                }
-            }
-
-            buildReferences += delegate.buildItems.map { ($0, path) }
-
-            // Merge metadata (first non-nil value wins). Slicer descriptions often arrive
-            // as (sometimes double-encoded) HTML, so clean every field to plain text.
-            if metadata.title == nil { metadata.title = Self.cleanMetadata(delegate.metadata["Title"]) }
-            if metadata.designer == nil { metadata.designer = Self.cleanMetadata(delegate.metadata["Designer"]) }
-            if metadata.description == nil { metadata.description = Self.cleanMetadata(delegate.metadata["Description"]) }
-            if metadata.copyright == nil { metadata.copyright = Self.cleanMetadata(delegate.metadata["Copyright"]) }
-            if metadata.application == nil { metadata.application = Self.cleanMetadata(delegate.metadata["Application"]) }
-        }
-
-        // Merge color data across objects: if any object has colors, backfill others with gray
-        let anyHasColors = allObjects.values.contains { $0.triangleColors != nil }
-        if anyHasColors {
-            for key in allObjects.keys {
-                if allObjects[key]!.triangleColors == nil {
-                    let count = allObjects[key]!.triangles.count
-                    allObjects[key]!.triangleColors = Array(
-                        repeating: (defaultGray, defaultGray, defaultGray), count: count
-                    )
-                }
-            }
-        }
-
-        // Some writers reference an object in another file without naming the file. When the
-        // id isn't in the referencing file, match it anywhere in the package, first file in
-        // path order winning. An explicit `p:path` is always taken at its word.
-        var keysByID: [Int: ObjectKey] = [:]
-        for key in Set(allObjects.keys).union(allComponents.keys).sorted() where keysByID[key.id] == nil {
-            keysByID[key.id] = key
-        }
-        func resolve(_ reference: ObjectReference, in path: String) -> ObjectKey {
-            let key = ObjectKey(path: reference.path ?? path, id: reference.objectID)
-            guard reference.path == nil, allObjects[key] == nil, allComponents[key] == nil else { return key }
-            return keysByID[reference.objectID] ?? key
-        }
-
-        var allBuildItems = buildReferences.map { (object: resolve($0.reference, in: $0.file), transform: $0.reference.transform) }
-        let originalBuildItemKeys = Set(allBuildItems.map { $0.object })
-
-        // Objects referenced by a <component> are assembly parts, not standalone roots.
-        let componentChildKeys = Set(allComponents.flatMap { parent, components in
-            components.map { resolve($0, in: parent.path) }
-        })
-
-        // If no build items were specified, render every top-level object — i.e. one
-        // that isn't itself a component of another object — with an identity transform.
-        if allBuildItems.isEmpty {
-            let rootKeys = Set(allObjects.keys).union(allComponents.keys).subtracting(componentChildKeys)
-            for key in rootKeys.sorted() {
-                allBuildItems.append((object: key, transform: matrix_identity_float4x4))
-            }
-        }
-
-        // Flatten an object into (mesh, world-transform) pairs, following <component>
-        // references. `visited` breaks reference cycles in malformed files.
-        // `inheritedColor` carries an object's filament colour down to the component meshes
-        // that actually hold its geometry — the slicer records the filament slot on the
-        // container object, one level above the mesh.
-        func expand(
-            _ key: ObjectKey,
-            _ transform: simd_float4x4,
-            _ visited: Set<ObjectKey>,
-            _ inheritedColor: SIMD4<Float>?
-        ) -> [BuildItem] {
-            guard !visited.contains(key), visited.count < 64 else { return [] }
-            // Negative parts are boolean cutting tools. They shape other geometry and are
-            // never printed, so rendering them puts solid blocks through the model.
-            // Slicer metadata names objects by bare id; Bambu keeps ids unique package-wide.
-            guard !project.negativeParts.contains(key.id) else { return [] }
-
-            let color = project.color(forObject: key.id) ?? inheritedColor
-            var out: [BuildItem] = []
-            if var mesh = allObjects[key] {
-                // Only where the model XML carried no colour of its own — the standard
-                // material extensions outrank the slicer's sidecar metadata.
-                if mesh.triangleColors == nil, let color {
-                    mesh.triangleColors = Array(
-                        repeating: (color, color, color), count: mesh.triangles.count
-                    )
-                }
-                out.append(BuildItem(mesh: mesh, transform: transform))
-            }
-            if let components = allComponents[key] {
-                var nextVisited = visited
-                nextVisited.insert(key)
-                for component in components {
-                    // Column-vector nesting: world = parent · component (parent on the left).
-                    out += expand(resolve(component, in: key.path), transform * component.transform, nextVisited, color)
-                }
-            }
-            return out
-        }
-
-        // The model files an object's geometry is spread across: its own, plus every file
-        // its components reach into.
-        func modelPaths(_ key: ObjectKey, _ visited: inout Set<ObjectKey>, into paths: inout Set<String>) {
-            guard visited.insert(key).inserted else { return }
-            paths.insert(key.path)
-            for component in allComponents[key] ?? [] {
-                modelPaths(resolve(component, in: key.path), &visited, into: &paths)
-            }
-        }
-
-        // Expand each build item exactly once; plates are then just groupings of the result.
-        var expanded: [(object: ObjectKey, items: [BuildItem])] = []
-        for item in allBuildItems {
-            expanded.append((item.object, expand(item.object, item.transform, [], nil)))
-        }
-
-        var result = expanded.flatMap { $0.items }
-
-        // Safety net: render any mesh reached by neither a build item nor a component.
-        for key in allObjects.keys.sorted()
-        where !originalBuildItemKeys.contains(key) && !componentChildKeys.contains(key) {
-            result += expand(key, matrix_identity_float4x4, [], nil)
-        }
-
-        guard !result.isEmpty else {
-            throw ThreeMFParserError.parsingFailed("No mesh data found in any model file")
-        }
-
-        // Every plate shares one coordinate space, laid out side by side, so rendering them
-        // together scatters the model across the bed and makes the dimensions meaningless.
-        // Group by plate and show one; the caller can page through the rest. Plates the
-        // slicer declared but left empty are kept, so plate numbering matches the slicer's.
-        let plates: [PlateContents] = project.plates.enumerated().map { position, plate in
-            let members = Set(plate.objectIDs)
-            let placed = expanded.filter { members.contains($0.object.id) }
-            var paths = Set<String>()
-            var visited = Set<ObjectKey>()
-            for entry in placed {
-                modelPaths(entry.object, &visited, into: &paths)
-            }
-            return PlateContents(
-                name: plate.name,
-                items: placed.flatMap { $0.items },
-                estimate: project.estimate(forPlateAt: position),
-                modelPaths: paths.sorted()
-            )
-        }
-        let shownPlate = plates.firstIndex { !$0.items.isEmpty }
-        // A file without plate assignments but with exactly one sliced plate still gets it.
-        let estimate = shownPlate.flatMap { plates[$0].estimate }
-            ?? (plates.isEmpty && project.sliceEstimates.count == 1 ? project.sliceEstimates.first?.value : nil)
-
-        return ParseResult(
-            items: shownPlate.map { plates[$0].items } ?? result,
-            metadata: metadata,
-            plates: plates,
-            plateIndex: shownPlate,
-            printSettings: project.printSettings.isEmpty ? nil : project.printSettings,
-            sliceEstimate: estimate
-        )
-    }
-
-    /// An object's identity: ids are only unique within the model file that defines them.
-    private struct ObjectKey: Hashable, Comparable {
-        let path: String
-        let id: Int
-
-        /// By id first, so a single-file package keeps the id order it always had.
-        static func < (a: ObjectKey, b: ObjectKey) -> Bool {
-            (a.id, a.path) < (b.id, b.path)
-        }
+        try ThreeMFPackage(fileAt: url).firstResult()
     }
 
     /// Extract a pre-rendered preview image embedded in the .3mf archive without parsing geometry.
@@ -376,7 +184,7 @@ final class ThreeMFParser {
         return nil
     }
 
-    private static func openArchive(fileAt url: URL) throws -> Archive {
+    fileprivate static func openArchive(fileAt url: URL) throws -> Archive {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
@@ -622,6 +430,395 @@ final class ThreeMFParser {
 }
 
 // MARK: - XML Parsing
+
+/// An open .3mf package that parses model files on demand.
+///
+/// Bambu Studio and OrcaSlicer keep each object's geometry in a file of its own under
+/// `3D/Objects/`, and only one plate is on screen at a time. So only the root model and the
+/// shown plate's files are parsed; paging parses the next plate's and drops the last's.
+/// Memory then follows the plate on screen rather than the whole project, which matters in
+/// Quick Look, where an extension over its memory limit is killed and the preview is blank.
+///
+/// Anything that can't be split safely — no plates, no root model, a reference that doesn't
+/// say which file its object is in — has every file parsed, as before.
+final class ThreeMFPackage {
+    private static let rootPath = "3D/3dmodel.model"
+
+    let project: SlicerProject
+    private let archive: Archive
+    /// Every `.model` entry by package path, and the paths in archive order.
+    private let entries: [String: Entry]
+    private let order: [String]
+    /// The model files currently parsed.
+    private var files: [String: ModelFile] = [:]
+    private var assembly: Assembly
+    private var metadata = ModelMetadata()
+    /// Plates found to hold nothing once parsed. Remembered after their files are dropped,
+    /// so paging keeps skipping them.
+    private var emptyPlates = Set<Int>()
+    /// Paging parses on a background queue; this keeps two pages from interleaving.
+    private let lock = NSLock()
+
+    init(fileAt url: URL) throws {
+        archive = try ThreeMFParser.openArchive(fileAt: url)
+        // Bambu/Orca keep colour, plate layout and boolean-part roles in their own files
+        // under Metadata/. Absent for spec-only 3MFs, in which case this is all no-ops.
+        project = SlicerProject.read(from: archive)
+
+        // Mesh may be in 3D/3dmodel.model or 3D/Objects/*.model
+        var entries: [String: Entry] = [:]
+        var order: [String] = []
+        for entry in archive where entry.path.hasSuffix(".model") && entry.type == .file {
+            let path = ObjectReference.normalizedPath(entry.path)
+            entries[path] = entry
+            order.append(path)
+        }
+        guard !order.isEmpty else {
+            throw ThreeMFParserError.modelEntryNotFound
+        }
+        self.entries = entries
+        self.order = order
+        assembly = Assembly(project: project, files: [], allPaths: Set(order))
+    }
+
+    /// The result to open on: the first plate with anything on it, having parsed only what
+    /// that plate needs — or, for a package without plates, everything.
+    func firstResult() throws -> ParseResult {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if !project.plates.isEmpty, entries[Self.rootPath] != nil {
+            try load([Self.rootPath])
+            for index in project.plates.indices where assembly.needs(of: project.plates[index]).mayHaveGeometry {
+                try loadPlate(index)
+                if !plateItems(index).isEmpty {
+                    metadata = mergedMetadata()
+                    return try result(showing: index, lazy: true)
+                }
+                emptyPlates.insert(index)
+            }
+        }
+
+        try load(Set(order))
+        metadata = mergedMetadata()
+        let first = project.plates.indices.first { !plateItems($0).isEmpty }
+        return try result(showing: first, lazy: false)
+    }
+
+    /// A result showing plate `index`, parsing its model files if they aren't already.
+    func result(showingPlate index: Int) throws -> ParseResult {
+        lock.lock()
+        defer { lock.unlock() }
+        try loadPlate(index)
+        if plateItems(index).isEmpty { emptyPlates.insert(index) }
+        return try result(showing: index, lazy: true)
+    }
+
+    /// Parse whatever plate `index` needs, dropping files it doesn't. Repeats because a
+    /// file can only be looked inside once parsed, and it may reference further files.
+    private func loadPlate(_ index: Int) throws {
+        let plate = project.plates[index]
+        for _ in 0..<8 {
+            let needs = assembly.needs(of: plate)
+            if needs.isComplete { return }
+            try load(needs.paths.union([Self.rootPath]))
+        }
+    }
+
+    /// Make `paths` exactly the set of parsed files: parse the missing, drop the rest.
+    private func load(_ paths: Set<String>) throws {
+        files = files.filter { paths.contains($0.key) }
+        for path in paths where files[path] == nil {
+            guard let entry = entries[path] else { continue }
+            var xmlData = Data()
+            _ = try archive.extract(entry) { chunk in
+                xmlData.append(chunk)
+            }
+            // A file that fails to parse still counts as loaded, with nothing in it.
+            files[path] = ModelFile(xmlData)
+        }
+        assembly = Assembly(
+            project: project,
+            files: order.compactMap { path in files[path].map { (path, $0) } },
+            allPaths: Set(order)
+        )
+    }
+
+    private func plateItems(_ index: Int) -> [BuildItem] {
+        let members = Set(project.plates[index].objectIDs)
+        return assembly.expanded.filter { members.contains($0.object.id) }.flatMap { $0.items }
+    }
+
+    /// First non-nil value wins, in archive order. Slicer descriptions often arrive as
+    /// (sometimes double-encoded) HTML, so every field is cleaned to plain text.
+    private func mergedMetadata() -> ModelMetadata {
+        var metadata = ModelMetadata()
+        for path in order {
+            guard let raw = files[path]?.metadata else { continue }
+            if metadata.title == nil { metadata.title = ThreeMFParser.cleanMetadata(raw["Title"]) }
+            if metadata.designer == nil { metadata.designer = ThreeMFParser.cleanMetadata(raw["Designer"]) }
+            if metadata.description == nil { metadata.description = ThreeMFParser.cleanMetadata(raw["Description"]) }
+            if metadata.copyright == nil { metadata.copyright = ThreeMFParser.cleanMetadata(raw["Copyright"]) }
+            if metadata.application == nil { metadata.application = ThreeMFParser.cleanMetadata(raw["Application"]) }
+        }
+        return metadata
+    }
+
+    private func result(showing index: Int?, lazy: Bool) throws -> ParseResult {
+        // Every plate shares one coordinate space, laid out side by side, so rendering them
+        // together scatters the model across the bed and makes the dimensions meaningless.
+        // Group by plate and show one; the caller can page through the rest. Plates the
+        // slicer declared but left empty are kept, so plate numbering matches the slicer's.
+        let plates: [PlateContents] = project.plates.enumerated().map { position, plate in
+            let needs = assembly.needs(of: plate)
+            let items = needs.isComplete ? plateItems(position) : []
+            return PlateContents(
+                name: plate.name,
+                items: items,
+                estimate: project.estimate(forPlateAt: position),
+                modelPaths: needs.paths.sorted(),
+                isLoaded: needs.isComplete,
+                hasGeometry: needs.isComplete ? !items.isEmpty : needs.mayHaveGeometry && !emptyPlates.contains(position)
+            )
+        }
+
+        let items: [BuildItem]
+        if let index {
+            items = plates[index].items
+        } else {
+            items = assembly.everything()
+            guard !items.isEmpty else {
+                throw ThreeMFParserError.parsingFailed("No mesh data found in any model file")
+            }
+        }
+        // A file without plate assignments but with exactly one sliced plate still gets it.
+        let estimate = index.flatMap { plates[$0].estimate }
+            ?? (plates.isEmpty && project.sliceEstimates.count == 1 ? project.sliceEstimates.first?.value : nil)
+
+        return ParseResult(
+            items: items,
+            metadata: metadata,
+            plates: plates,
+            plateIndex: index,
+            printSettings: project.printSettings.isEmpty ? nil : project.printSettings,
+            sliceEstimate: estimate,
+            package: lazy ? self : nil
+        )
+    }
+}
+
+/// One parsed `.model` file, before its objects are assembled into build items.
+private struct ModelFile {
+    var meshes: [Int: MeshData] = [:]
+    var components: [Int: [ObjectReference]] = [:]
+    var buildItems: [ObjectReference] = []
+    var metadata: [String: String] = [:]
+
+    init(_ xml: Data) {
+        let parser = FastModelParser()
+        guard parser.parse(xml) else { return }
+        for (id, object) in parser.objects {
+            if !object.vertices.isEmpty {
+                meshes[id] = MeshData(
+                    vertices: object.vertices,
+                    triangles: object.triangles,
+                    triangleColors: object.triangleColors
+                )
+            }
+            // Retain assembly containers even though they carry no mesh of their own.
+            if !object.components.isEmpty {
+                components[id] = object.components
+            }
+        }
+        buildItems = parser.buildItems
+        metadata = parser.metadata
+    }
+}
+
+/// An object's identity: ids are only unique within the model file that defines them.
+private struct ObjectKey: Hashable, Comparable {
+    let path: String
+    let id: Int
+
+    /// By id first, so a single-file package keeps the id order it always had.
+    static func < (a: ObjectKey, b: ObjectKey) -> Bool {
+        (a.id, a.path) < (b.id, b.path)
+    }
+}
+
+/// The parsed model files assembled into renderable geometry. Built over whichever files
+/// are parsed: a reference into a file that isn't is left dangling, not followed.
+private struct Assembly {
+    let project: SlicerProject
+    /// Every model file in the package, parsed or not.
+    let allPaths: Set<String>
+    let loadedPaths: Set<String>
+    private(set) var meshes: [ObjectKey: MeshData] = [:]
+    private(set) var components: [ObjectKey: [ObjectReference]] = [:]
+    private var keysByID: [Int: ObjectKey] = [:]
+    private var buildItemKeys = Set<ObjectKey>()
+    private var componentChildKeys = Set<ObjectKey>()
+    /// Each build item expanded exactly once; plates are then just groupings of these.
+    private(set) var expanded: [(object: ObjectKey, items: [BuildItem])] = []
+
+    /// `files` in archive order, which sets the order build items render in.
+    init(project: SlicerProject, files: [(path: String, file: ModelFile)], allPaths: Set<String>) {
+        self.project = project
+        self.allPaths = allPaths
+        loadedPaths = Set(files.map { $0.path })
+
+        // Object ids are scoped to the file that defines them, so objects are keyed by
+        // (file, id): two files may both hold an object 1.
+        var buildReferences: [(reference: ObjectReference, file: String)] = []
+        for (path, file) in files {
+            for (id, mesh) in file.meshes { meshes[ObjectKey(path: path, id: id)] = mesh }
+            for (id, references) in file.components { components[ObjectKey(path: path, id: id)] = references }
+            buildReferences += file.buildItems.map { ($0, path) }
+        }
+
+        // Merge color data across objects: if any object has colors, backfill others with gray
+        let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
+        if meshes.values.contains(where: { $0.triangleColors != nil }) {
+            for key in meshes.keys where meshes[key]!.triangleColors == nil {
+                let count = meshes[key]!.triangles.count
+                meshes[key]!.triangleColors = Array(repeating: (defaultGray, defaultGray, defaultGray), count: count)
+            }
+        }
+
+        for key in Set(meshes.keys).union(components.keys).sorted() where keysByID[key.id] == nil {
+            keysByID[key.id] = key
+        }
+
+        var buildItems = buildReferences.map {
+            (object: resolve($0.reference, in: $0.file), transform: $0.reference.transform)
+        }
+        buildItemKeys = Set(buildItems.map { $0.object })
+
+        // Objects referenced by a <component> are assembly parts, not standalone roots.
+        componentChildKeys = Set(components.flatMap { parent, references in
+            references.map { resolve($0, in: parent.path) }
+        })
+
+        // If no build items were specified, render every top-level object — i.e. one
+        // that isn't itself a component of another object — with an identity transform.
+        if buildItems.isEmpty {
+            let rootKeys = Set(meshes.keys).union(components.keys).subtracting(componentChildKeys)
+            for key in rootKeys.sorted() {
+                buildItems.append((object: key, transform: matrix_identity_float4x4))
+            }
+        }
+
+        expanded = buildItems.map { ($0.object, expand($0.object, $0.transform, [], nil)) }
+    }
+
+    /// Some writers reference an object in another file without naming the file. When the
+    /// id isn't in the referencing file, match it anywhere in the package, first file in
+    /// path order winning. An explicit `p:path` is always taken at its word.
+    func resolve(_ reference: ObjectReference, in path: String) -> ObjectKey {
+        let key = ObjectKey(path: reference.path ?? path, id: reference.objectID)
+        guard reference.path == nil, meshes[key] == nil, components[key] == nil else { return key }
+        return keysByID[reference.objectID] ?? key
+    }
+
+    /// Flatten an object into (mesh, world-transform) pairs, following <component>
+    /// references. `visited` breaks reference cycles in malformed files.
+    /// `inheritedColor` carries an object's filament colour down to the component meshes
+    /// that actually hold its geometry — the slicer records the filament slot on the
+    /// container object, one level above the mesh.
+    func expand(
+        _ key: ObjectKey,
+        _ transform: simd_float4x4,
+        _ visited: Set<ObjectKey>,
+        _ inheritedColor: SIMD4<Float>?
+    ) -> [BuildItem] {
+        guard !visited.contains(key), visited.count < 64 else { return [] }
+        // Negative parts are boolean cutting tools. They shape other geometry and are
+        // never printed, so rendering them puts solid blocks through the model.
+        // Slicer metadata names objects by bare id; Bambu keeps ids unique package-wide.
+        guard !project.negativeParts.contains(key.id) else { return [] }
+
+        let color = project.color(forObject: key.id) ?? inheritedColor
+        var out: [BuildItem] = []
+        if var mesh = meshes[key] {
+            // Only where the model XML carried no colour of its own — the standard
+            // material extensions outrank the slicer's sidecar metadata.
+            if mesh.triangleColors == nil, let color {
+                mesh.triangleColors = Array(repeating: (color, color, color), count: mesh.triangles.count)
+            }
+            out.append(BuildItem(mesh: mesh, transform: transform))
+        }
+        if let references = components[key] {
+            var nextVisited = visited
+            nextVisited.insert(key)
+            for reference in references {
+                // Column-vector nesting: world = parent · component (parent on the left).
+                out += expand(resolve(reference, in: key.path), transform * reference.transform, nextVisited, color)
+            }
+        }
+        return out
+    }
+
+    /// Everything, as for a package without plates: each build item, plus any mesh that
+    /// neither a build item nor a component reaches.
+    func everything() -> [BuildItem] {
+        var result = expanded.flatMap { $0.items }
+        for key in meshes.keys.sorted() where !buildItemKeys.contains(key) && !componentChildKeys.contains(key) {
+            result += expand(key, matrix_identity_float4x4, [], nil)
+        }
+        return result
+    }
+
+    struct PlateNeeds {
+        /// Model files the plate's geometry is spread across, as far as can be seen.
+        var paths = Set<String>()
+        /// Every file the plate needs is parsed, so its items are final.
+        var isComplete = true
+        /// Reaches a mesh, or a file not yet parsed that might hold one.
+        var mayHaveGeometry = false
+    }
+
+    /// What it takes to show `plate`, walking its objects' components through the parsed
+    /// files. A file not yet parsed can't be looked inside, so its own references only
+    /// come to light once it is.
+    func needs(of plate: SlicerProject.Plate) -> PlateNeeds {
+        let members = Set(plate.objectIDs)
+        let allLoaded = loadedPaths.isSuperset(of: allPaths)
+        var needs = PlateNeeds()
+        var visited = Set<ObjectKey>()
+
+        func walk(_ key: ObjectKey) {
+            // Negative parts aren't rendered, so their files needn't be parsed.
+            guard !project.negativeParts.contains(key.id), visited.insert(key).inserted else { return }
+            guard loadedPaths.contains(key.path) else {
+                if allPaths.contains(key.path) {
+                    needs.paths.insert(key.path)
+                    needs.isComplete = false
+                    needs.mayHaveGeometry = true
+                }
+                return
+            }
+            needs.paths.insert(key.path)
+            if meshes[key] != nil { needs.mayHaveGeometry = true }
+            for reference in components[key] ?? [] {
+                let named = ObjectKey(path: reference.path ?? key.path, id: reference.objectID)
+                if reference.path == nil, !allLoaded, meshes[named] == nil, components[named] == nil {
+                    // In another file that the reference doesn't name: only parsing
+                    // everything can say which.
+                    needs.paths.formUnion(allPaths)
+                    needs.isComplete = false
+                    needs.mayHaveGeometry = true
+                    continue
+                }
+                walk(resolve(reference, in: key.path))
+            }
+        }
+
+        for entry in expanded where members.contains(entry.object.id) {
+            walk(entry.object)
+        }
+        return needs
+    }
+}
 
 /// Parsed data for a single `<object>` element.
 ///

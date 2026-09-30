@@ -9,6 +9,11 @@ struct ContentView: View {
     @State private var parseResult: ParseResult?
     @State private var errorMessage: String?
     @State private var isSpinning = true
+    /// The plate paging is heading for while its model files load; nil once it's shown.
+    @State private var targetPlate: Int?
+    @State private var isLoadingPlate = false
+    /// Bumped per file, so a plate load that finishes after another file opened is dropped.
+    @State private var fileGeneration = 0
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -65,7 +70,8 @@ struct ContentView: View {
                     }
                     .overlay(alignment: .topTrailing) {
                         if let result = parseResult, populatedPlateCount(result) > 1 {
-                            PlateSwitcher(result: result, step: stepPlate)
+                            PlateSwitcher(result: result, index: targetPlate ?? result.plateIndex,
+                                          isLoading: isLoadingPlate, step: stepPlate)
                                 .padding(10)
                         }
                     }
@@ -110,27 +116,57 @@ struct ContentView: View {
     }
 
     private func populatedPlateCount(_ result: ParseResult) -> Int {
-        result.plates.filter { !$0.items.isEmpty }.count
+        result.plates.filter { $0.hasGeometry }.count
     }
 
     /// Page to the next plate holding geometry, wrapping at the ends.
     private func stepPlate(_ delta: Int) {
         guard let current = parseResult, current.plateCount > 1,
-              let index = current.plateIndex else { return }
+              let index = targetPlate ?? current.plateIndex else { return }
         var next = index
         for _ in 0..<current.plateCount {
             next = (next + delta + current.plateCount) % current.plateCount
-            if !current.plates[next].items.isEmpty { break }
+            if current.plates[next].hasGeometry { break }
         }
-        guard next != index, let updated = current.showingPlate(next) else { return }
-        parseResult = updated
-        let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
-        scene = SceneBuilder.buildScene(from: updated.items, appearance: appearance,
-                                        bedSize: updated.printSettings?.bedSize)
+        guard next != index else { return }
+        targetPlate = next
+        showTargetPlate(from: current)
+    }
+
+    /// Show `targetPlate`, first parsing its model files off the main thread if they aren't
+    /// loaded. Steps taken mid-load only move the target; it is loaded once this one ends.
+    private func showTargetPlate(from base: ParseResult) {
+        guard !isLoadingPlate, let target = targetPlate else { return }
+        if base.plates[target].isLoaded, let updated = base.showingPlate(target) {
+            targetPlate = nil
+            parseResult = updated
+            let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
+            scene = SceneBuilder.buildScene(from: updated.items, appearance: appearance,
+                                            bedSize: updated.printSettings?.bedSize)
+            return
+        }
+
+        isLoadingPlate = true
+        let generation = fileGeneration
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = try? base.loadingPlate(target)
+            DispatchQueue.main.async {
+                guard generation == fileGeneration else { return }
+                isLoadingPlate = false
+                if let loaded {
+                    showTargetPlate(from: loaded)
+                } else {
+                    targetPlate = nil
+                }
+            }
+        }
     }
 
     private func loadFile(at url: URL) {
         errorMessage = nil
+        fileGeneration += 1
+        targetPlate = nil
+        isLoadingPlate = false
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
@@ -253,6 +289,9 @@ struct ViewControls: View {
 /// Pages between the build plates of a multi-plate slicer project.
 struct PlateSwitcher: View {
     let result: ParseResult
+    /// The plate to name — the one being paged to, while it loads.
+    let index: Int?
+    let isLoading: Bool
     let step: (Int) -> Void
 
     var body: some View {
@@ -262,6 +301,9 @@ struct PlateSwitcher: View {
             Text(label)
                 .font(.caption.weight(.medium))
                 .monospacedDigit()
+            if isLoading {
+                ProgressView().controlSize(.mini)
+            }
             Button { step(1) } label: { Image(systemName: "chevron.right") }
                 .accessibilityLabel("Next plate")
         }
@@ -272,7 +314,7 @@ struct PlateSwitcher: View {
     }
 
     private var label: String {
-        guard let index = result.plateIndex else { return "" }
+        guard let index else { return "" }
         let counter = "Plate \(index + 1)/\(result.plateCount)"
         if let name = result.plates[index].name, !name.isEmpty {
             return "\(counter) · \(name)"
