@@ -409,13 +409,72 @@ final class ThreeMFParserTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let result = try ThreeMFParser.parse(fileAt: url)
-        let items = result.items
-        // Two separate .model files, each with object id=1, produces 2 build items
-        // (second file's object overwrites first since same id — but each file has its own build items)
-        XCTAssertGreaterThanOrEqual(items.count, 1)
-        // Total vertices across all items
-        let totalVertices = items.reduce(0) { $0 + $1.mesh.vertices.count }
-        XCTAssertGreaterThanOrEqual(totalVertices, 4)
+        // Both files define an object 1. Ids are scoped per file, so each file's build item
+        // gets its own mesh rather than one overwriting the other.
+        XCTAssertEqual(result.items.count, 2)
+        XCTAssertEqual(result.totalVertices, 7)
+    }
+
+    /// A root model whose containers pull meshes from other files by `p:path`, the way
+    /// Bambu Studio and the 3MF production extension lay a package out.
+    private func makeProductionRoot(_ components: [(containerID: Int, path: String?, objectID: Int)]) -> Data {
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        xml += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\""
+        xml += " xmlns:p=\"http://schemas.microsoft.com/3dmanufacturing/production/2015/06\"><resources>"
+        for c in components {
+            let pathAttr = c.path.map { " p:path=\"\($0)\"" } ?? ""
+            xml += "<object id=\"\(c.containerID)\" type=\"model\"><components>"
+            xml += "<component\(pathAttr) objectid=\"\(c.objectID)\"/></components></object>"
+        }
+        xml += "</resources><build>"
+        for c in components { xml += "<item objectid=\"\(c.containerID)\"/>" }
+        xml += "</build></model>"
+        return Data(xml.utf8)
+    }
+
+    func testComponentPathsResolveObjectsWithTheSameIdInDifferentFiles() throws {
+        // Ids are scoped per file: both part files hold an object 1, and each container
+        // must get the mesh from the file it names.
+        let triangle = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        let square = makeModelXML(
+            vertices: [SIMD3(5, 0, 0), SIMD3(6, 0, 0), SIMD3(5, 1, 0), SIMD3(6, 1, 0)],
+            triangles: [(0, 1, 2), (1, 3, 2)]
+        )
+        let result = try parseArchive(MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: makeProductionRoot([
+                (10, "/3D/Objects/a.model", 1),
+                (11, "/3D/Objects/b.model", 1),
+            ])),
+            .init(path: "3D/Objects/a.model", data: triangle),
+            .init(path: "3D/Objects/b.model", data: square),
+        ]))
+        // makeModelXML also gives each part file a build item of its own; the root's two
+        // containers must still resolve to one triangle and one square.
+        let triangleCounts = result.items.map { $0.mesh.triangles.count }.sorted()
+        XCTAssertEqual(triangleCounts.filter { $0 == 1 }.count, triangleCounts.filter { $0 == 2 }.count)
+        XCTAssertTrue(triangleCounts.contains(1))
+        XCTAssertTrue(triangleCounts.contains(2))
+    }
+
+    func testComponentWithoutPathFallsBackToObjectInAnotherFile() throws {
+        // Not spec-conformant, but seen in the wild: a component naming an id that only
+        // exists in another file, with no p:path. It should still find the mesh.
+        var part = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        part += "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\"><resources>"
+        part += "<object id=\"7\" type=\"model\"><mesh><vertices>"
+        part += "<vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/><vertex x=\"0\" y=\"1\" z=\"0\"/>"
+        part += "</vertices><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\"/></triangles></mesh></object>"
+        part += "</resources><build/></model>"
+
+        let result = try parseArchive(MiniZIP.createArchive(entries: [
+            .init(path: "3D/3dmodel.model", data: makeProductionRoot([(10, nil, 7)])),
+            .init(path: "3D/Objects/part.model", data: Data(part.utf8)),
+        ]))
+        XCTAssertEqual(result.items.count, 1)
+        XCTAssertEqual(result.totalTriangles, 1)
     }
 
     func testInvalidArchive() throws {
@@ -1066,6 +1125,23 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.plateCount, 0)
         XCTAssertFalse(result.hasColors)
+    }
+
+    func testPlatesRecordTheModelFilesTheyNeed() throws {
+        let result = try parseArchive(makeMultiPlateProject(plates: 3, trianglesPerPlate: 1))
+        XCTAssertEqual(result.plates.map(\.modelPaths), (1...3).map {
+            ["3D/3dmodel.model", "3D/Objects/object_\($0).model"]
+        })
+    }
+
+    func testSingleFilePlatesNeedOnlyTheRootModel() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [1])],
+            meshes: [1],
+            plates: [[2]]
+        ))
+        XCTAssertEqual(result.plates.map(\.modelPaths), [["3D/3dmodel.model"]])
     }
 
     func testAllPlatesAreAvailableForPaging() throws {
@@ -1886,5 +1962,8 @@ final class ThreeMFParserTests: XCTestCase {
         let m = try measureParse(of: url)
         log(url.lastPathComponent, m)
         XCTAssertGreaterThan(m.result.totalTriangles, 0)
+        for (index, plate) in m.result.plates.enumerated() {
+            report("[benchmark] \(url.lastPathComponent) plate \(index + 1): \(plate.modelPaths.count) model files")
+        }
     }
 }

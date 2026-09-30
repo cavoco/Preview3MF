@@ -30,6 +30,9 @@ struct PlateContents {
     var items: [BuildItem]
     /// Print time and filament weight, once the plate has been sliced.
     var estimate: SliceEstimate?
+    /// Package paths of the model files holding this plate's geometry, sorted — the root
+    /// model plus whichever `3D/Objects/*.model` files its objects reference.
+    var modelPaths: [String] = []
 }
 
 struct ParseResult {
@@ -135,10 +138,11 @@ final class ThreeMFParser {
             throw ThreeMFParserError.modelEntryNotFound
         }
 
-        // Parse all model files, collecting objects keyed by id and build items
-        var allObjects: [Int: MeshData] = [:]
-        var allComponents: [Int: [(objectID: Int, transform: simd_float4x4)]] = [:]
-        var allBuildItems: [(objectID: Int, transform: simd_float4x4)] = []
+        // Parse all model files. Object ids are scoped to the file that defines them, so
+        // objects are keyed by (file, id): two files may both hold an object 1.
+        var allObjects: [ObjectKey: MeshData] = [:]
+        var allComponents: [ObjectKey: [ObjectReference]] = [:]
+        var buildReferences: [(reference: ObjectReference, file: String)] = []
         var metadata = ModelMetadata()
         let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
 
@@ -150,10 +154,12 @@ final class ThreeMFParser {
 
             let delegate = FastModelParser()
             guard delegate.parse(xmlData) else { continue }
+            let path = ObjectReference.normalizedPath(entry.path)
 
             for (id, obj) in delegate.objects {
+                let key = ObjectKey(path: path, id: id)
                 if !obj.vertices.isEmpty {
-                    allObjects[id] = MeshData(
+                    allObjects[key] = MeshData(
                         vertices: obj.vertices,
                         triangles: obj.triangles,
                         triangleColors: obj.triangleColors
@@ -161,11 +167,11 @@ final class ThreeMFParser {
                 }
                 // Retain assembly containers even though they carry no mesh of their own.
                 if !obj.components.isEmpty {
-                    allComponents[id] = obj.components
+                    allComponents[key] = obj.components
                 }
             }
 
-            allBuildItems.append(contentsOf: delegate.buildItems)
+            buildReferences += delegate.buildItems.map { ($0, path) }
 
             // Merge metadata (first non-nil value wins). Slicer descriptions often arrive
             // as (sometimes double-encoded) HTML, so clean every field to plain text.
@@ -179,27 +185,43 @@ final class ThreeMFParser {
         // Merge color data across objects: if any object has colors, backfill others with gray
         let anyHasColors = allObjects.values.contains { $0.triangleColors != nil }
         if anyHasColors {
-            for id in allObjects.keys {
-                if allObjects[id]!.triangleColors == nil {
-                    let count = allObjects[id]!.triangles.count
-                    allObjects[id]!.triangleColors = Array(
+            for key in allObjects.keys {
+                if allObjects[key]!.triangleColors == nil {
+                    let count = allObjects[key]!.triangles.count
+                    allObjects[key]!.triangleColors = Array(
                         repeating: (defaultGray, defaultGray, defaultGray), count: count
                     )
                 }
             }
         }
 
-        let originalBuildItemIDs = Set(allBuildItems.map { $0.objectID })
+        // Some writers reference an object in another file without naming the file. When the
+        // id isn't in the referencing file, match it anywhere in the package, first file in
+        // path order winning. An explicit `p:path` is always taken at its word.
+        var keysByID: [Int: ObjectKey] = [:]
+        for key in Set(allObjects.keys).union(allComponents.keys).sorted() where keysByID[key.id] == nil {
+            keysByID[key.id] = key
+        }
+        func resolve(_ reference: ObjectReference, in path: String) -> ObjectKey {
+            let key = ObjectKey(path: reference.path ?? path, id: reference.objectID)
+            guard reference.path == nil, allObjects[key] == nil, allComponents[key] == nil else { return key }
+            return keysByID[reference.objectID] ?? key
+        }
+
+        var allBuildItems = buildReferences.map { (object: resolve($0.reference, in: $0.file), transform: $0.reference.transform) }
+        let originalBuildItemKeys = Set(allBuildItems.map { $0.object })
 
         // Objects referenced by a <component> are assembly parts, not standalone roots.
-        let componentChildIDs = Set(allComponents.values.flatMap { $0.map { $0.objectID } })
+        let componentChildKeys = Set(allComponents.flatMap { parent, components in
+            components.map { resolve($0, in: parent.path) }
+        })
 
         // If no build items were specified, render every top-level object — i.e. one
         // that isn't itself a component of another object — with an identity transform.
         if allBuildItems.isEmpty {
-            let rootIDs = Set(allObjects.keys).union(allComponents.keys).subtracting(componentChildIDs)
-            for id in rootIDs.sorted() {
-                allBuildItems.append((objectID: id, transform: matrix_identity_float4x4))
+            let rootKeys = Set(allObjects.keys).union(allComponents.keys).subtracting(componentChildKeys)
+            for key in rootKeys.sorted() {
+                allBuildItems.append((object: key, transform: matrix_identity_float4x4))
             }
         }
 
@@ -209,19 +231,20 @@ final class ThreeMFParser {
         // that actually hold its geometry — the slicer records the filament slot on the
         // container object, one level above the mesh.
         func expand(
-            _ objectID: Int,
+            _ key: ObjectKey,
             _ transform: simd_float4x4,
-            _ visited: Set<Int>,
+            _ visited: Set<ObjectKey>,
             _ inheritedColor: SIMD4<Float>?
         ) -> [BuildItem] {
-            guard !visited.contains(objectID), visited.count < 64 else { return [] }
+            guard !visited.contains(key), visited.count < 64 else { return [] }
             // Negative parts are boolean cutting tools. They shape other geometry and are
             // never printed, so rendering them puts solid blocks through the model.
-            guard !project.negativeParts.contains(objectID) else { return [] }
+            // Slicer metadata names objects by bare id; Bambu keeps ids unique package-wide.
+            guard !project.negativeParts.contains(key.id) else { return [] }
 
-            let color = project.color(forObject: objectID) ?? inheritedColor
+            let color = project.color(forObject: key.id) ?? inheritedColor
             var out: [BuildItem] = []
-            if var mesh = allObjects[objectID] {
+            if var mesh = allObjects[key] {
                 // Only where the model XML carried no colour of its own — the standard
                 // material extensions outrank the slicer's sidecar metadata.
                 if mesh.triangleColors == nil, let color {
@@ -231,29 +254,39 @@ final class ThreeMFParser {
                 }
                 out.append(BuildItem(mesh: mesh, transform: transform))
             }
-            if let components = allComponents[objectID] {
+            if let components = allComponents[key] {
                 var nextVisited = visited
-                nextVisited.insert(objectID)
+                nextVisited.insert(key)
                 for component in components {
                     // Column-vector nesting: world = parent · component (parent on the left).
-                    out += expand(component.objectID, transform * component.transform, nextVisited, color)
+                    out += expand(resolve(component, in: key.path), transform * component.transform, nextVisited, color)
                 }
             }
             return out
         }
 
+        // The model files an object's geometry is spread across: its own, plus every file
+        // its components reach into.
+        func modelPaths(_ key: ObjectKey, _ visited: inout Set<ObjectKey>, into paths: inout Set<String>) {
+            guard visited.insert(key).inserted else { return }
+            paths.insert(key.path)
+            for component in allComponents[key] ?? [] {
+                modelPaths(resolve(component, in: key.path), &visited, into: &paths)
+            }
+        }
+
         // Expand each build item exactly once; plates are then just groupings of the result.
-        var expanded: [(objectID: Int, items: [BuildItem])] = []
+        var expanded: [(object: ObjectKey, items: [BuildItem])] = []
         for item in allBuildItems {
-            expanded.append((item.objectID, expand(item.objectID, item.transform, [], nil)))
+            expanded.append((item.object, expand(item.object, item.transform, [], nil)))
         }
 
         var result = expanded.flatMap { $0.items }
 
         // Safety net: render any mesh reached by neither a build item nor a component.
-        for id in allObjects.keys.sorted()
-        where !originalBuildItemIDs.contains(id) && !componentChildIDs.contains(id) {
-            result += expand(id, matrix_identity_float4x4, [], nil)
+        for key in allObjects.keys.sorted()
+        where !originalBuildItemKeys.contains(key) && !componentChildKeys.contains(key) {
+            result += expand(key, matrix_identity_float4x4, [], nil)
         }
 
         guard !result.isEmpty else {
@@ -266,10 +299,17 @@ final class ThreeMFParser {
         // slicer declared but left empty are kept, so plate numbering matches the slicer's.
         let plates: [PlateContents] = project.plates.enumerated().map { position, plate in
             let members = Set(plate.objectIDs)
+            let placed = expanded.filter { members.contains($0.object.id) }
+            var paths = Set<String>()
+            var visited = Set<ObjectKey>()
+            for entry in placed {
+                modelPaths(entry.object, &visited, into: &paths)
+            }
             return PlateContents(
                 name: plate.name,
-                items: expanded.filter { members.contains($0.objectID) }.flatMap { $0.items },
-                estimate: project.estimate(forPlateAt: position)
+                items: placed.flatMap { $0.items },
+                estimate: project.estimate(forPlateAt: position),
+                modelPaths: paths.sorted()
             )
         }
         let shownPlate = plates.firstIndex { !$0.items.isEmpty }
@@ -285,6 +325,17 @@ final class ThreeMFParser {
             printSettings: project.printSettings.isEmpty ? nil : project.printSettings,
             sliceEstimate: estimate
         )
+    }
+
+    /// An object's identity: ids are only unique within the model file that defines them.
+    private struct ObjectKey: Hashable, Comparable {
+        let path: String
+        let id: Int
+
+        /// By id first, so a single-file package keeps the id order it always had.
+        static func < (a: ObjectKey, b: ObjectKey) -> Bool {
+            (a.id, a.path) < (b.id, b.path)
+        }
     }
 
     /// Extract a pre-rendered preview image embedded in the .3mf archive without parsing geometry.
@@ -581,14 +632,28 @@ struct ParsedObject {
     var vertices: [SIMD3<Float>] = []
     var triangles: [(UInt32, UInt32, UInt32)] = []
     var triangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
-    var components: [(objectID: Int, transform: simd_float4x4)] = []
+    var components: [ObjectReference] = []
+}
+
+/// A `<component>` or build `<item>`: a placement of an object, which may live in another
+/// model file.
+struct ObjectReference {
+    var objectID: Int
+    /// Package path of the model file holding the object — the production extension's
+    /// `p:path`, without its leading slash. `nil` means the file the reference sits in.
+    var path: String?
+    var transform: simd_float4x4
+
+    static func normalizedPath(_ raw: String) -> String {
+        raw.hasPrefix("/") ? String(raw.dropFirst()) : raw
+    }
 }
 
 final class ModelXMLDelegate: NSObject, XMLParserDelegate {
     /// Objects keyed by their `id` attribute.
     var objects: [Int: ParsedObject] = [:]
     /// Build items parsed from `<build><item>`.
-    var buildItems: [(objectID: Int, transform: simd_float4x4)] = []
+    var buildItems: [ObjectReference] = []
     /// Metadata entries keyed by name (e.g. "Title", "Designer").
     var metadata: [String: String] = [:]
 
@@ -602,7 +667,7 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
     private var currentVertices: [SIMD3<Float>] = []
     private var currentTriangles: [(UInt32, UInt32, UInt32)] = []
     private var currentTriangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
-    private var currentComponents: [(objectID: Int, transform: simd_float4x4)] = []
+    private var currentComponents: [ObjectReference] = []
 
     // Object-level default material
     private var objectPID: Int?
@@ -705,7 +770,11 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
                   let objectID = Int(idStr)
             else { break }
             let transform = attributes["transform"].map(Self.parseTransform) ?? matrix_identity_float4x4
-            currentComponents.append((objectID: objectID, transform: transform))
+            currentComponents.append(ObjectReference(
+                objectID: objectID,
+                path: attributes["p:path"].map(ObjectReference.normalizedPath),
+                transform: transform
+            ))
 
         case "metadata":
             if let name = attributes["name"] {
@@ -728,7 +797,11 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
             } else {
                 transform = matrix_identity_float4x4
             }
-            buildItems.append((objectID: objectID, transform: transform))
+            buildItems.append(ObjectReference(
+                objectID: objectID,
+                path: attributes["p:path"].map(ObjectReference.normalizedPath),
+                transform: transform
+            ))
 
         default:
             break
@@ -845,7 +918,7 @@ final class ModelXMLDelegate: NSObject, XMLParserDelegate {
 /// separator, matching the process's default C numeric locale.)
 final class FastModelParser {
     var objects: [Int: ParsedObject] = [:]
-    var buildItems: [(objectID: Int, transform: simd_float4x4)] = []
+    var buildItems: [ObjectReference] = []
     var metadata: [String: String] = [:]
 
     private var materialGroups: [Int: [SIMD4<Float>]] = [:]
@@ -856,7 +929,7 @@ final class FastModelParser {
     private var currentVertices: [SIMD3<Float>] = []
     private var currentTriangles: [(UInt32, UInt32, UInt32)] = []
     private var currentTriangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
-    private var currentComponents: [(objectID: Int, transform: simd_float4x4)] = []
+    private var currentComponents: [ObjectReference] = []
     private var objectPID: Int?
     private var objectPIndex: Int?
     private var inBuild = false
@@ -901,6 +974,12 @@ final class FastModelParser {
                     body(ns, nl, vs)
                     p += 1
                 }
+            }
+            // The production extension's `p:path`. The prefix is the writer's choice, so match
+            // any prefixed attribute whose local name is `path`; the core spec has none.
+            @inline(__always) func isPathAttribute(_ an: Int, _ al: Int) -> Bool {
+                guard al > 5, bytes[an + al - 5] == colon else { return false }
+                return nameIs(an + al - 4, 4, "path")
             }
             @inline(__always) func str(_ vs: Int, _ ve: Int) -> String {
                 String(decoding: UnsafeBufferPointer(rebasing: bytes[vs..<ve]), as: UTF8.self)
@@ -1017,25 +1096,22 @@ final class FastModelParser {
                         else if nameIs(an, al, "pindex") { objectPIndex = d(vs) }
                     }
                     currentVertices = []; currentTriangles = []; currentTriangleColors = nil; currentComponents = []
-                } else if nameIs(ns, nl, "component") {
-                    if currentObjectID != nil {
+                } else if nameIs(ns, nl, "component") || nameIs(ns, nl, "item") {
+                    // Both place an object, optionally one in another model file.
+                    let isItem = nameIs(ns, nl, "item")
+                    if isItem ? inBuild : currentObjectID != nil {
                         var objectID: Int? = nil
+                        var path: String? = nil
                         var transform = matrix_identity_float4x4
                         forEachAttr(j, attrEnd) { an, al, vs in
                             if nameIs(an, al, "objectid") { objectID = d(vs) }
                             else if nameIs(an, al, "transform") { transform = ModelXMLDelegate.parseTransform(str(vs, valueEnd(vs))) }
+                            else if isPathAttribute(an, al) { path = ObjectReference.normalizedPath(str(vs, valueEnd(vs))) }
                         }
-                        if let objectID { currentComponents.append((objectID: objectID, transform: transform)) }
-                    }
-                } else if nameIs(ns, nl, "item") {
-                    if inBuild {
-                        var objectID: Int? = nil
-                        var transform = matrix_identity_float4x4
-                        forEachAttr(j, attrEnd) { an, al, vs in
-                            if nameIs(an, al, "objectid") { objectID = d(vs) }
-                            else if nameIs(an, al, "transform") { transform = ModelXMLDelegate.parseTransform(str(vs, valueEnd(vs))) }
+                        if let objectID {
+                            let reference = ObjectReference(objectID: objectID, path: path, transform: transform)
+                            if isItem { buildItems.append(reference) } else { currentComponents.append(reference) }
                         }
-                        if let objectID { buildItems.append((objectID: objectID, transform: transform)) }
                     }
                 } else if nameIs(ns, nl, "build") {
                     inBuild = true
