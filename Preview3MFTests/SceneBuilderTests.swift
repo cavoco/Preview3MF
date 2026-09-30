@@ -288,6 +288,25 @@ final class SceneBuilderTests: XCTestCase {
         XCTAssertEqual(colorSource?.componentsPerVector, 4)
     }
 
+    func testUniformColourBecomesPerVertexColours() throws {
+        // A slicer-coloured mesh holds one colour; the geometry still needs it per vertex.
+        let green = SIMD4<Float>(0, 1, 0, 1)
+        var mesh = MeshData(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(1, 1, 0)],
+            triangles: [(0, 1, 2), (1, 3, 2)],
+            triangleColors: nil
+        )
+        mesh.uniformColor = green
+        let geometry = SceneBuilder.buildGeometry(from: mesh)
+
+        let colorSource = try XCTUnwrap(geometry.sources.first { $0.semantic == .color })
+        XCTAssertEqual(colorSource.vectorCount, 6)
+        let floats = colorSource.data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        for vertex in 0..<6 {
+            XCTAssertEqual(Array(floats[(vertex * 4)..<(vertex * 4 + 4)]), [0, 1, 0, 1])
+        }
+    }
+
     func testUncoloredGeometryHasNoColorSource() throws {
         let scene = SceneBuilder.buildScene(from: makeTriangleItems())
         let modelNode = try findModelNode(in: scene)

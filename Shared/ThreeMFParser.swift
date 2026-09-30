@@ -8,6 +8,18 @@ struct MeshData {
     /// Per-triangle vertex colors (one RGBA tuple per triangle, three colors per vertex).
     /// `nil` means no color data — use default gray.
     var triangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
+    /// One colour for the whole mesh, used when `triangleColors` is nil. Slicer filament
+    /// colours arrive this way, and spelling one out per triangle cost 48 bytes a triangle —
+    /// 180 MB for a 3.8M-triangle plate.
+    var uniformColor: SIMD4<Float>? = nil
+
+    var hasColors: Bool { triangleColors != nil || uniformColor != nil }
+
+    /// The colours of triangle `index`'s three vertices, or nil for an uncoloured mesh.
+    func colors(ofTriangle index: Int) -> (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)? {
+        if let triangleColors { return triangleColors[index] }
+        return uniformColor.map { ($0, $0, $0) }
+    }
 }
 
 struct BuildItem {
@@ -95,7 +107,7 @@ struct ParseResult {
     }
 
     var hasColors: Bool {
-        items.contains { $0.mesh.triangleColors != nil }
+        items.contains { $0.mesh.hasColors }
     }
 
     /// Bounding box dimensions in model units (mm), accounting for transforms.
@@ -676,12 +688,10 @@ private struct Assembly {
             buildReferences += file.buildItems.map { ($0, path) }
         }
 
-        // Merge color data across objects: if any object has colors, backfill others with gray
-        let defaultGray = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
+        // Merge color data across objects: if any object has colors, the rest are gray
         if meshes.values.contains(where: { $0.triangleColors != nil }) {
             for key in meshes.keys where meshes[key]!.triangleColors == nil {
-                let count = meshes[key]!.triangles.count
-                meshes[key]!.triangleColors = Array(repeating: (defaultGray, defaultGray, defaultGray), count: count)
+                meshes[key]!.uniformColor = SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
             }
         }
 
@@ -742,8 +752,8 @@ private struct Assembly {
         if var mesh = meshes[key] {
             // Only where the model XML carried no colour of its own — the standard
             // material extensions outrank the slicer's sidecar metadata.
-            if mesh.triangleColors == nil, let color {
-                mesh.triangleColors = Array(repeating: (color, color, color), count: mesh.triangles.count)
+            if !mesh.hasColors, let color {
+                mesh.uniformColor = color
             }
             out.append(BuildItem(mesh: mesh, transform: transform))
         }

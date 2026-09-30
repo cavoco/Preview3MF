@@ -226,7 +226,7 @@ final class SceneBuilder {
         var faceNormals: [SCNVector3] = []
         var faceColors: [Float] = []
         var indices: [UInt32] = []
-        let hasColors = mesh.triangleColors != nil
+        let hasColors = mesh.hasColors
 
         for (i, tri) in triangles.enumerated() {
             let i0 = Int(tri.0), i1 = Int(tri.1), i2 = Int(tri.2)
@@ -256,8 +256,7 @@ final class SceneBuilder {
             indices.append(baseIndex + 1)
             indices.append(baseIndex + 2)
 
-            if let colors = mesh.triangleColors {
-                let (c0, c1, c2) = colors[i]
+            if let (c0, c1, c2) = mesh.colors(ofTriangle: i) {
                 faceColors.append(contentsOf: [c0.x, c0.y, c0.z, c0.w])
                 faceColors.append(contentsOf: [c1.x, c1.y, c1.z, c1.w])
                 faceColors.append(contentsOf: [c2.x, c2.y, c2.z, c2.w])

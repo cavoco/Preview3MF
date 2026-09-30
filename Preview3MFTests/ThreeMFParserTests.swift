@@ -914,10 +914,13 @@ final class ThreeMFParserTests: XCTestCase {
         ))
         XCTAssertEqual(result.items.count, 2)
         XCTAssertTrue(result.hasColors)
-        let first = try XCTUnwrap(result.items[0].mesh.triangleColors?.first)
-        let second = try XCTUnwrap(result.items[1].mesh.triangleColors?.first)
+        let first = try XCTUnwrap(result.items[0].mesh.colors(ofTriangle: 0))
+        let second = try XCTUnwrap(result.items[1].mesh.colors(ofTriangle: 0))
         XCTAssertEqual(first.0, SIMD4<Float>(1, 0, 0, 1))
         XCTAssertEqual(second.0, SIMD4<Float>(0, 0, 1, 1))
+        // Held once per mesh, not spelled out per triangle.
+        XCTAssertNil(result.items[0].mesh.triangleColors)
+        XCTAssertEqual(result.items[0].mesh.uniformColor, SIMD4<Float>(1, 0, 0, 1))
     }
 
     func testOnlyFirstPlateIsRendered() throws {
@@ -1091,7 +1094,7 @@ final class ThreeMFParserTests: XCTestCase {
             .init(path: "Metadata/project_settings.config", data: Data(settings.utf8)),
             .init(path: "Metadata/model_settings.config", data: Data(config.utf8)),
         ]))
-        let colour = try XCTUnwrap(result.items[0].mesh.triangleColors?.first)
+        let colour = try XCTUnwrap(result.items[0].mesh.colors(ofTriangle: 0))
         XCTAssertEqual(colour.0, SIMD4<Float>(0, 1, 0, 1), "colorgroup green must win over filament red")
     }
 
@@ -1285,7 +1288,7 @@ final class ThreeMFParserTests: XCTestCase {
         let second = try XCTUnwrap(result.showingPlate(1))
         XCTAssertEqual(second.plateIndex, 1)
         XCTAssertEqual(second.items.count, 1)
-        let colour = try XCTUnwrap(second.items[0].mesh.triangleColors?.first)
+        let colour = try XCTUnwrap(second.items[0].mesh.colors(ofTriangle: 0))
         XCTAssertEqual(colour.0, SIMD4<Float>(0, 0, 1, 1), "plate 2's object is on filament 2")
         // Metadata is a property of the file, not the plate, so it must carry across.
         XCTAssertEqual(second.metadata.title, result.metadata.title)
