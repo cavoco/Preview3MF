@@ -1,5 +1,6 @@
 import XCTest
 import SceneKit
+import Metal
 import simd
 @testable import Preview3MF
 
@@ -288,8 +289,9 @@ final class SceneBuilderTests: XCTestCase {
         XCTAssertEqual(colorSource?.componentsPerVector, 4)
     }
 
-    func testUniformColourBecomesPerVertexColours() throws {
-        // A slicer-coloured mesh holds one colour; the geometry still needs it per vertex.
+    func testUniformColourIsAMaterialNotPerVertexColours() throws {
+        // A slicer-coloured mesh holds one colour; it goes on the material rather than
+        // costing 16 bytes a vertex.
         let green = SIMD4<Float>(0, 1, 0, 1)
         var mesh = MeshData(
             vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(1, 1, 0)],
@@ -299,11 +301,35 @@ final class SceneBuilderTests: XCTestCase {
         mesh.uniformColor = green
         let geometry = SceneBuilder.buildGeometry(from: mesh)
 
-        let colorSource = try XCTUnwrap(geometry.sources.first { $0.semantic == .color })
-        XCTAssertEqual(colorSource.vectorCount, 6)
-        let floats = colorSource.data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
-        for vertex in 0..<6 {
-            XCTAssertEqual(Array(floats[(vertex * 4)..<(vertex * 4 + 4)]), [0, 1, 0, 1])
+        XCTAssertNil(geometry.sources.first { $0.semantic == .color })
+        let diffuse = try XCTUnwrap(geometry.firstMaterial?.diffuse.contents as? NSColor)
+        XCTAssertEqual(diffuse, SceneBuilder.linearColor(green))
+    }
+
+    func testUniformColourRendersLikePerVertexColours() throws {
+        // SceneKit reads vertex colours as linear values; the material colour has to match
+        // that exactly, or slicer-coloured models would change shade.
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("No Metal device") }
+        let renderer = SCNRenderer(device: device, options: nil)
+        func centrePixel(_ mesh: MeshData) throws -> [Int] {
+            renderer.scene = SceneBuilder.buildScene(
+                from: [BuildItem(mesh: mesh, transform: matrix_identity_float4x4)], showBuildPlate: false
+            )
+            let image = renderer.snapshot(atTime: 0, with: CGSize(width: 64, height: 64), antialiasingMode: .none)
+            let rep = try XCTUnwrap(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+            let c = try XCTUnwrap(rep.colorAt(x: 32, y: 32)?.usingColorSpace(.sRGB))
+            return [c.redComponent, c.greenComponent, c.blueComponent].map { Int(($0 * 255).rounded()) }
+        }
+        let quad = MeshData(
+            vertices: [SIMD3(-50, -50, 0), SIMD3(50, -50, 0), SIMD3(50, 50, 0), SIMD3(-50, 50, 0)],
+            triangles: [(0, 1, 2), (0, 2, 3)]
+        )
+        for colour in [SIMD4<Float>(0.757, 0.180, 0.122, 1), SIMD4(0.75, 0.75, 0.75, 1), SIMD4(0.05, 0.1, 0.4, 1)] {
+            var uniform = quad
+            uniform.uniformColor = colour
+            var perVertex = quad
+            perVertex.triangleColors = Array(repeating: (colour, colour, colour), count: 2)
+            XCTAssertEqual(try centrePixel(uniform), try centrePixel(perVertex), "colour \(colour)")
         }
     }
 

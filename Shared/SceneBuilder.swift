@@ -217,85 +217,84 @@ final class SceneBuilder {
 
     // MARK: - Geometry
 
+    /// Flat-shaded geometry: each triangle gets its own three vertices, so its face normal
+    /// isn't averaged with its neighbours'.
+    ///
+    /// Written straight into the buffers SceneKit keeps, as 32-bit floats, with no arrays in
+    /// between. A 3.8M-triangle plate went through `SCNVector3` arrays (three 8-byte
+    /// components each), then copies of them, peaking over 700 MB.
     static func buildGeometry(from mesh: MeshData) -> SCNGeometry {
         let vertices = mesh.vertices
         let triangles = mesh.triangles
+        let triangleColors = mesh.triangleColors
 
-        // Build per-face vertices with normals for flat shading
-        var faceVertices: [SCNVector3] = []
-        var faceNormals: [SCNVector3] = []
-        var faceColors: [Float] = []
-        var indices: [UInt32] = []
-        let hasColors = mesh.hasColors
+        let positions = UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 9)
+        let normals = UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 9)
+        let colors = triangleColors.map { _ in UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 12) }
 
+        var kept = 0
         for (i, tri) in triangles.enumerated() {
             let i0 = Int(tri.0), i1 = Int(tri.1), i2 = Int(tri.2)
             // Skip triangles that reference vertices outside the mesh — a malformed
             // .3mf would otherwise crash with an out-of-bounds access.
             guard i0 < vertices.count, i1 < vertices.count, i2 < vertices.count else { continue }
-            let v0 = vertices[i0]
-            let v1 = vertices[i1]
-            let v2 = vertices[i2]
+            let v0 = vertices[i0], v1 = vertices[i1], v2 = vertices[i2]
 
             // Compute face normal (CCW winding)
-            let edge1 = v1 - v0
-            let edge2 = v2 - v0
-            let normal = simd_normalize(simd_cross(edge1, edge2))
-            let scnNormal = SCNVector3(normal.x, normal.y, normal.z)
+            let normal = simd_normalize(simd_cross(v1 - v0, v2 - v0))
 
-            // Index off the running vertex count, not i*3, so skipped triangles
-            // don't leave gaps that desync indices from faceVertices.
-            let baseIndex = UInt32(faceVertices.count)
-            faceVertices.append(SCNVector3(v0.x, v0.y, v0.z))
-            faceVertices.append(SCNVector3(v1.x, v1.y, v1.z))
-            faceVertices.append(SCNVector3(v2.x, v2.y, v2.z))
-            faceNormals.append(scnNormal)
-            faceNormals.append(scnNormal)
-            faceNormals.append(scnNormal)
-            indices.append(baseIndex)
-            indices.append(baseIndex + 1)
-            indices.append(baseIndex + 2)
+            // Written at the running count, not i, so skipped triangles leave no gaps.
+            let p = positions + kept * 9, n = normals + kept * 9
+            write3(p, v0); write3(p + 3, v1); write3(p + 6, v2)
+            write3(n, normal); write3(n + 3, normal); write3(n + 6, normal)
+            if let colors, let (c0, c1, c2) = triangleColors?[i] {
+                let c = colors + kept * 12
+                write4(c, c0); write4(c + 4, c1); write4(c + 8, c2)
+            }
+            kept += 1
+        }
 
-            if let (c0, c1, c2) = mesh.colors(ofTriangle: i) {
-                faceColors.append(contentsOf: [c0.x, c0.y, c0.z, c0.w])
-                faceColors.append(contentsOf: [c1.x, c1.y, c1.z, c1.w])
-                faceColors.append(contentsOf: [c2.x, c2.y, c2.z, c2.w])
+        let vertexCount = kept * 3
+        func source(_ buffer: UnsafeMutablePointer<Float>, _ semantic: SCNGeometrySource.Semantic,
+                    components: Int) -> SCNGeometrySource {
+            // Handed over without a copy; SceneKit frees it with the geometry.
+            let data = Data(bytesNoCopy: buffer, count: vertexCount * components * 4,
+                            deallocator: .custom { pointer, _ in pointer.deallocate() })
+            return SCNGeometrySource(
+                data: data, semantic: semantic, vectorCount: vertexCount,
+                usesFloatComponents: true, componentsPerVector: components,
+                bytesPerComponent: 4, dataOffset: 0, dataStride: components * 4
+            )
+        }
+        var sources = [source(positions, .vertex, components: 3), source(normals, .normal, components: 3)]
+        if let colors {
+            sources.append(source(colors, .color, components: 4))
+        }
+
+        // Every triangle has vertices of its own, so the indices just count up. 16 bits
+        // are enough for most meshes and halve the index buffer.
+        let bytesPerIndex = vertexCount <= Int(UInt16.max) + 1 ? 2 : 4
+        var indexData = Data(count: vertexCount * bytesPerIndex)
+        indexData.withUnsafeMutableBytes { raw in
+            if bytesPerIndex == 2 {
+                let indices = raw.bindMemory(to: UInt16.self)
+                for i in 0..<vertexCount { indices[i] = UInt16(i) }
+            } else {
+                let indices = raw.bindMemory(to: UInt32.self)
+                for i in 0..<vertexCount { indices[i] = UInt32(i) }
             }
         }
-
-        let vertexSource = SCNGeometrySource(
-            vertices: faceVertices
-        )
-        let normalSource = SCNGeometrySource(
-            normals: faceNormals
-        )
         let element = SCNGeometryElement(
-            indices: indices,
-            primitiveType: .triangles
+            data: indexData, primitiveType: .triangles, primitiveCount: kept, bytesPerIndex: bytesPerIndex
         )
-
-        var sources = [vertexSource, normalSource]
-
-        if hasColors {
-            let colorData = Data(bytes: faceColors, count: faceColors.count * MemoryLayout<Float>.size)
-            let colorSource = SCNGeometrySource(
-                data: colorData,
-                semantic: .color,
-                vectorCount: faceVertices.count,
-                usesFloatComponents: true,
-                componentsPerVector: 4,
-                bytesPerComponent: MemoryLayout<Float>.size,
-                dataOffset: 0,
-                dataStride: MemoryLayout<Float>.size * 4
-            )
-            sources.append(colorSource)
-        }
 
         let geometry = SCNGeometry(sources: sources, elements: [element])
 
         let material = SCNMaterial()
-        if hasColors {
+        if colors != nil {
             material.diffuse.contents = NSColor.white
+        } else if let color = mesh.uniformColor {
+            material.diffuse.contents = linearColor(color)
         } else {
             material.diffuse.contents = NSColor(white: 0.75, alpha: 1.0)
         }
@@ -306,5 +305,24 @@ final class SceneBuilder {
         geometry.materials = [material]
 
         return geometry
+    }
+
+    @inline(__always)
+    private static func write3(_ p: UnsafeMutablePointer<Float>, _ v: SIMD3<Float>) {
+        p[0] = v.x; p[1] = v.y; p[2] = v.z
+    }
+
+    @inline(__always)
+    private static func write4(_ p: UnsafeMutablePointer<Float>, _ v: SIMD4<Float>) {
+        p[0] = v.x; p[1] = v.y; p[2] = v.z; p[3] = v.w
+    }
+
+    /// A whole-mesh colour as a material colour that renders exactly as the same values do
+    /// as vertex colours, which SceneKit reads as linear. (The values are really sRGB, so
+    /// both render lighter than the filament; kept identical so the two paths agree.)
+    static func linearColor(_ color: SIMD4<Float>) -> NSColor {
+        let space = NSColorSpace(cgColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!)!
+        let components = [CGFloat(color.x), CGFloat(color.y), CGFloat(color.z), CGFloat(color.w)]
+        return NSColor(colorSpace: space, components: components, count: 4)
     }
 }
