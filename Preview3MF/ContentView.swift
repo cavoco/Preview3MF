@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var isLoadingPlate = false
     /// Bumped per file, so a plate load that finishes after another file opened is dropped.
     @State private var fileGeneration = 0
+    /// The way paging last went (+1 or -1), so the plate that way is the one parsed ahead.
+    @State private var pagingDirection = 1
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -121,16 +123,31 @@ struct ContentView: View {
 
     /// Page to the next plate holding geometry, wrapping at the ends.
     private func stepPlate(_ delta: Int) {
-        guard let current = parseResult, current.plateCount > 1,
-              let index = targetPlate ?? current.plateIndex else { return }
-        var next = index
-        for _ in 0..<current.plateCount {
-            next = (next + delta + current.plateCount) % current.plateCount
-            if current.plates[next].hasGeometry { break }
-        }
-        guard next != index else { return }
+        guard let current = parseResult, let index = targetPlate ?? current.plateIndex,
+              let next = Self.plate(after: index, step: delta, in: current) else { return }
+        pagingDirection = delta
         targetPlate = next
         showTargetPlate(from: current)
+    }
+
+    /// The next plate with geometry from `index`, stepping by `step` and wrapping at the
+    /// ends, or nil if there is nowhere else to go.
+    private static func plate(after index: Int, step: Int, in result: ParseResult) -> Int? {
+        guard result.plateCount > 1 else { return nil }
+        var next = index
+        for _ in 0..<result.plateCount {
+            next = (next + step + result.plateCount) % result.plateCount
+            if result.plates[next].hasGeometry { break }
+        }
+        return next == index ? nil : next
+    }
+
+    /// Start parsing the plate paging is likeliest to reach next, while this one is looked at.
+    private func prefetchNextPlate(_ result: ParseResult) {
+        guard let package = result.package, let current = result.plateIndex,
+              let next = Self.plate(after: current, step: pagingDirection, in: result),
+              !result.plates[next].isLoaded else { return }
+        package.prefetchPlate(next)
     }
 
     /// Show `targetPlate`, first parsing its model files off the main thread if they aren't
@@ -143,6 +160,7 @@ struct ContentView: View {
             let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
             scene = SceneBuilder.buildScene(from: updated.items, appearance: appearance,
                                             bedSize: updated.printSettings?.bedSize)
+            prefetchNextPlate(updated)
             return
         }
 
@@ -177,6 +195,8 @@ struct ContentView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { newScene.isPaused = false }
             scene = newScene
             parseResult = result
+            pagingDirection = 1
+            prefetchNextPlate(result)
         } catch {
             errorMessage = error.localizedDescription
             scene = nil

@@ -488,6 +488,17 @@ final class ThreeMFPackage {
     /// Paging parses on a background queue; this keeps two pages from interleaving.
     private let lock = NSLock()
 
+    /// Uncompressed model XML a prefetch may take on: about 65 MB once parsed, next to the
+    /// few hundred MB the plate on screen can take as a scene.
+    var prefetchBudget: UInt64 = 256 << 20
+    private let prefetchQueue = DispatchQueue(label: "Preview3MF.prefetch", qos: .utility)
+    /// Bumped by paging, which abandons any prefetch in flight. Guarded by its own lock
+    /// because a running prefetch holds `lock`.
+    private var prefetchGeneration = 0
+    private let generationLock = NSLock()
+    /// Model files parsed so far, for tests to tell a prefetched plate from a parsed one.
+    private(set) var filesParsed = 0
+
     init(fileAt url: URL) throws {
         archive = try ThreeMFParser.openArchive(fileAt: url)
         // Bambu/Orca keep colour, plate layout and boolean-part roles in their own files
@@ -536,41 +547,83 @@ final class ThreeMFPackage {
 
     /// A result showing plate `index`, parsing its model files if they aren't already.
     func result(showingPlate index: Int) throws -> ParseResult {
+        cancelPrefetch()
         lock.lock()
         defer { lock.unlock() }
         try loadPlate(index)
+        // Drop what this plate doesn't need — the last plate's files, or a prefetch that
+        // guessed the wrong way.
+        try load(assembly.needs(of: project.plates[index]).paths.union([Self.rootPath]))
         if plateItems(index).isEmpty { emptyPlates.insert(index) }
         return try result(showing: index, lazy: true)
     }
 
-    /// Parse whatever plate `index` needs, dropping files it doesn't. Repeats because a
-    /// file can only be looked inside once parsed, and it may reference further files.
-    private func loadPlate(_ index: Int) throws {
+    /// Parse plate `index`'s model files in the background, keeping the shown plate's, so
+    /// paging to it only has to build the scene. Skipped when the files would run past
+    /// `prefetchBudget`, and abandoned as soon as a page is asked for.
+    func prefetchPlate(_ index: Int) {
+        let generation = generationLock.withLock { prefetchGeneration }
+        prefetchQueue.async { [self] in
+            let cancelled = { self.generationLock.withLock { self.prefetchGeneration != generation } }
+            lock.lock()
+            defer { lock.unlock() }
+            guard !cancelled(), project.plates.indices.contains(index) else { return }
+            // Cancellation surfaces as a thrown error; whatever finished parsing is kept.
+            try? loadPlate(index, prefetching: cancelled)
+        }
+    }
+
+    /// Blocks until any prefetch already asked for has finished. For tests.
+    func waitForPrefetch() {
+        prefetchQueue.sync {}
+    }
+
+    private func cancelPrefetch() {
+        generationLock.withLock { prefetchGeneration += 1 }
+    }
+
+    /// Parse whatever plate `index` needs. Repeats because a file can only be looked inside
+    /// once parsed, and it may reference further files. Paging drops files the plate
+    /// doesn't need as it goes; a prefetch keeps them, and stays within its budget.
+    private func loadPlate(_ index: Int, prefetching cancelled: (() -> Bool)? = nil) throws {
         let plate = project.plates[index]
         for _ in 0..<8 {
             let needs = assembly.needs(of: plate)
             if needs.isComplete { return }
-            try load(needs.paths.union([Self.rootPath]))
+            guard let cancelled else {
+                try load(needs.paths.union([Self.rootPath]))
+                continue
+            }
+            let missing = needs.paths.subtracting(files.keys)
+            let size = missing.reduce(UInt64(0)) { $0 + (entries[$1]?.uncompressedSize ?? 0) }
+            guard size <= prefetchBudget else { return }
+            try load(needs.paths.union(files.keys), cancelled: cancelled)
         }
     }
 
     /// Make `paths` exactly the set of parsed files: parse the missing, drop the rest.
-    private func load(_ paths: Set<String>) throws {
+    /// `cancelled` is checked as each chunk streams in; a file cut short is discarded.
+    private func load(_ paths: Set<String>, cancelled: (() -> Bool)? = nil) throws {
+        guard Set(files.keys) != paths else { return }
         files = files.filter { paths.contains($0.key) }
+        defer {
+            assembly = Assembly(
+                project: project,
+                files: order.compactMap { path in files[path].map { (path, $0) } },
+                allPaths: Set(order)
+            )
+        }
         for path in paths where files[path] == nil {
             guard let entry = entries[path] else { continue }
             // Streamed straight from the zip into the parser; the XML is never held whole.
             let parser = FastModelParser()
             _ = try archive.extract(entry, bufferSize: 256 * 1024) { chunk in
+                if let cancelled, cancelled() { throw CancellationError() }
                 parser.feed(chunk)
             }
             files[path] = ModelFile(parser)
+            filesParsed += 1
         }
-        assembly = Assembly(
-            project: project,
-            files: order.compactMap { path in files[path].map { (path, $0) } },
-            allPaths: Set(order)
-        )
     }
 
     private func plateItems(_ index: Int) -> [BuildItem] {

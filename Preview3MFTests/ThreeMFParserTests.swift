@@ -1339,6 +1339,53 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertTrue(result.plates[0].isLoaded)
     }
 
+    func testPrefetchedPlateNeedsNoParsingWhenPagedTo() throws {
+        let result = try parseArchive(makeMultiPlateProject(plates: 3, trianglesPerPlate: 5))
+        let package = try XCTUnwrap(result.package)
+        let parsedAtOpen = package.filesParsed
+
+        package.prefetchPlate(1)
+        package.waitForPrefetch()
+        XCTAssertEqual(package.filesParsed, parsedAtOpen + 1, "plate 2's one model file")
+
+        let second = try XCTUnwrap(result.loadingPlate(1))
+        XCTAssertEqual(package.filesParsed, parsedAtOpen + 1, "already parsed, so paging parses nothing")
+        XCTAssertEqual(second.totalTriangles, 5)
+        XCTAssertEqual(second.items.first?.mesh.vertices.first?.z, 2)
+        // Showing plate 2 drops plate 1's files, so memory holds one plate plus a prefetch.
+        XCTAssertEqual(second.plates.map(\.isLoaded), [false, true, false])
+    }
+
+    func testPrefetchPastBudgetIsSkipped() throws {
+        let result = try parseArchive(makeMultiPlateProject(plates: 2, trianglesPerPlate: 5))
+        let package = try XCTUnwrap(result.package)
+        let parsedAtOpen = package.filesParsed
+        package.prefetchBudget = 10
+
+        package.prefetchPlate(1)
+        package.waitForPrefetch()
+        XCTAssertEqual(package.filesParsed, parsedAtOpen)
+        // Paging still gets there; it just parses on demand.
+        XCTAssertEqual(try result.loadingPlate(1)?.totalTriangles, 5)
+    }
+
+    func testPagingDuringPrefetchStillShowsTheRightPlate() throws {
+        // Whether the page lands before, during or after the prefetch, the result must be
+        // the plate asked for.
+        let data = makeMultiPlateProject(plates: 3, trianglesPerPlate: 20_000)
+        for _ in 0..<5 {
+            let result = try parseArchive(data)
+            let package = try XCTUnwrap(result.package)
+            package.prefetchPlate(1)
+            let third = try XCTUnwrap(result.loadingPlate(2))
+            XCTAssertEqual(third.totalTriangles, 20_000)
+            XCTAssertEqual(third.items.first?.mesh.vertices.first?.z, 3)
+            package.waitForPrefetch()
+            let second = try XCTUnwrap(third.loadingPlate(1))
+            XCTAssertEqual(second.items.first?.mesh.vertices.first?.z, 2)
+        }
+    }
+
     func testSingleFileProjectLoadsEveryPlateUpFront() throws {
         // Everything is in the root model, so every plate is complete as soon as it's parsed.
         let result = try parseArchive(makeSlicerProjectArchive(
@@ -2184,6 +2231,20 @@ final class ThreeMFParserTests: XCTestCase {
             let page = try measure { try XCTUnwrap(result.loadingPlate(index)) }
             log("\(url.lastPathComponent) paging to plate \(index + 1) (\(page.result.plates[index].modelPaths.count) model files)", page)
             XCTAssertTrue(page.result.plates[index].isLoaded)
+            result = page.result
+        }
+
+        // Again, with each plate prefetched while the one before is on screen, as the
+        // preview does: paging then only has to assemble what's already parsed.
+        result = try XCTUnwrap(result.loadingPlate(0))
+        for index in result.plates.indices.dropFirst() where result.plates[index].hasGeometry {
+            let package = try XCTUnwrap(result.package)
+            let parsedBefore = package.filesParsed
+            package.prefetchPlate(index)
+            package.waitForPrefetch()
+            let prefetched = package.filesParsed - parsedBefore
+            let page = try measure { try XCTUnwrap(result.loadingPlate(index)) }
+            log("\(url.lastPathComponent) paging to prefetched plate \(index + 1) (\(prefetched) files prefetched)", page)
             result = page.result
         }
     }

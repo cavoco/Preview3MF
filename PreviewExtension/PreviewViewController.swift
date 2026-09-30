@@ -19,6 +19,9 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private var isLoadingPlate = false
     /// Bumped per file, so a plate load that finishes after another file opened is dropped.
     private var fileGeneration = 0
+    /// The way paging last went (+1 or -1): the likelier way to go next, so the plate
+    /// that way is the one parsed ahead.
+    private var pagingDirection = 1
     private let plateLoadQueue = DispatchQueue(label: "Preview3MF.plate-loading", qos: .userInitiated)
 
     override var nibName: NSNib.Name? { nil }
@@ -132,16 +135,32 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     /// Page to the next plate that actually holds geometry, wrapping at the ends. Plates the
     /// slicer left empty stay in the numbering but are skipped over.
     private func stepPlate(_ delta: Int) {
-        guard let result, result.plateCount > 1, let current = targetPlate ?? result.plateIndex else { return }
-        var next = current
-        for _ in 0..<result.plateCount {
-            next = (next + delta + result.plateCount) % result.plateCount
-            if result.plates[next].hasGeometry { break }
-        }
-        guard next != current else { return }
+        guard let result, let current = targetPlate ?? result.plateIndex,
+              let next = Self.plate(after: current, step: delta, in: result) else { return }
+        pagingDirection = delta
         targetPlate = next
         plateLabel.stringValue = plateLabelText(result, index: next)
         showTargetPlate(from: result)
+    }
+
+    /// The next plate with geometry from `index`, stepping by `step` and wrapping at the
+    /// ends, or nil if there is nowhere else to go.
+    private static func plate(after index: Int, step: Int, in result: ParseResult) -> Int? {
+        guard result.plateCount > 1 else { return nil }
+        var next = index
+        for _ in 0..<result.plateCount {
+            next = (next + step + result.plateCount) % result.plateCount
+            if result.plates[next].hasGeometry { break }
+        }
+        return next == index ? nil : next
+    }
+
+    /// Start parsing the plate paging is likeliest to reach next, while this one is looked at.
+    private func prefetchNextPlate() {
+        guard let result, let package = result.package, let current = result.plateIndex,
+              let next = Self.plate(after: current, step: pagingDirection, in: result),
+              !result.plates[next].isLoaded else { return }
+        package.prefetchPlate(next)
     }
 
     /// Show `targetPlate`, first parsing its model files off the main thread if they aren't
@@ -153,6 +172,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             targetPlate = nil
             result = updated
             render(updated, animated: false)
+            prefetchNextPlate()
             return
         }
 
@@ -192,8 +212,10 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             self.result = result
+            pagingDirection = 1
             render(result, animated: true)
             handler(nil)
+            prefetchNextPlate()
         } catch {
             handler(error)
         }
