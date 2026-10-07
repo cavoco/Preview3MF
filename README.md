@@ -93,7 +93,7 @@ bundle — and the phase fails silently rather than erroring.
 
 `.3mf` files are ZIP archives containing XML model data. The extension:
 
-1. Extracts all `.model` files from the archive (using [ZIPFoundation](https://github.com/weichsel/ZIPFoundation))
+1. Extracts all `.model` files from the archive (using [ZIPFoundation](https://github.com/weichsel/ZIPFoundation), from a [fork](https://github.com/cavoco/ZIPFoundation) with a ZIP64 fix)
 2. Parses `<vertex>`, `<triangle>`, `<build>` items, materials, and metadata from the XML
 3. Resolves `<component>` references so assembly objects expand to their part meshes with composed transforms
 4. Builds SceneKit geometry with per-face normals for flat shading, applying each build item's transform

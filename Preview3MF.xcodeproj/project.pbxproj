@@ -868,10 +868,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		A500000003 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/weichsel/ZIPFoundation.git";
+			repositoryURL = "https://github.com/cavoco/ZIPFoundation.git";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.9.19;
+				kind = revision;
+				revision = 514ad8d8e6b98b2c535d5653ab77e15b09a4fa61;
 			};
 		};
 		A500000005 /* XCRemoteSwiftPackageReference "Sparkle" */ = {

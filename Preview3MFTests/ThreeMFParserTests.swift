@@ -14,8 +14,12 @@ final class ThreeMFParserTests: XCTestCase {
         }
 
         /// `zip64Sentinels` writes sizes the way some slicers do: 0xFFFFFFFF in the headers,
-        /// with the real values in a ZIP64 extra field.
-        static func createArchive(entries: [Entry], deflate: Bool = false, zip64Sentinels: Bool = false) -> Data {
+        /// with the real values in a ZIP64 extra field. `zip64Offsets` goes further, as lib3mf
+        /// (Onshape and others) does: local header offsets and the central directory offset
+        /// are sentinels too, with a ZIP64 end of central directory record and locator.
+        static func createArchive(entries: [Entry], deflate: Bool = false, zip64Sentinels: Bool = false,
+                                  zip64Offsets: Bool = false) -> Data {
+            let zip64Sentinels = zip64Sentinels || zip64Offsets
             var archive = Data()
             var centralDirectory = Data()
             var localOffsets: [UInt32] = []
@@ -74,7 +78,11 @@ final class ThreeMFParserTests: XCTestCase {
                 append16(&centralDirectory, 0)   // mod time
                 append16(&centralDirectory, 0)   // mod date
                 append32(&centralDirectory, crc)
-                let size = sizes(i)
+                var size = sizes(i)
+                if zip64Offsets {
+                    size.extra.replaceSubrange(2..<4, with: [24, 0])
+                    append64(&size.extra, UInt64(localOffsets[i]))
+                }
                 append32(&centralDirectory, size.compressed)
                 append32(&centralDirectory, size.uncompressed)
                 append16(&centralDirectory, UInt16(nameData.count))
@@ -83,13 +91,33 @@ final class ThreeMFParserTests: XCTestCase {
                 append16(&centralDirectory, 0)   // disk number
                 append16(&centralDirectory, 0)   // internal attrs
                 append32(&centralDirectory, 0)   // external attrs
-                append32(&centralDirectory, localOffsets[i])
+                append32(&centralDirectory, zip64Offsets ? 0xFFFF_FFFF : localOffsets[i])
                 centralDirectory.append(nameData)
                 centralDirectory.append(size.extra)
             }
 
             let cdSize = UInt32(centralDirectory.count)
             archive.append(centralDirectory)
+
+            if zip64Offsets {
+                let recordOffset = UInt64(archive.count)
+                // ZIP64 end of central directory record
+                append32(&archive, 0x06064B50)
+                append64(&archive, 44)          // size of the rest of the record
+                append16(&archive, 45)          // version made by
+                append16(&archive, 45)          // version needed
+                append32(&archive, 0)           // disk number
+                append32(&archive, 0)           // cd start disk
+                append64(&archive, UInt64(entries.count))
+                append64(&archive, UInt64(entries.count))
+                append64(&archive, UInt64(cdSize))
+                append64(&archive, UInt64(cdOffset))
+                // ZIP64 end of central directory locator
+                append32(&archive, 0x07064B50)
+                append32(&archive, 0)           // disk with the record
+                append64(&archive, recordOffset)
+                append32(&archive, 1)           // total disks
+            }
 
             // End of central directory record
             append32(&archive, 0x06054B50)
@@ -98,7 +126,7 @@ final class ThreeMFParserTests: XCTestCase {
             append16(&archive, UInt16(entries.count))
             append16(&archive, UInt16(entries.count))
             append32(&archive, cdSize)
-            append32(&archive, cdOffset)
+            append32(&archive, zip64Offsets ? 0xFFFF_FFFF : cdOffset)
             append16(&archive, 0)   // comment length
 
             return archive
@@ -109,6 +137,10 @@ final class ThreeMFParserTests: XCTestCase {
         }
 
         private static func append32(_ data: inout Data, _ value: UInt32) {
+            withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+        }
+
+        private static func append64(_ data: inout Data, _ value: UInt64) {
             withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
         }
 
@@ -345,7 +377,6 @@ final class ThreeMFParserTests: XCTestCase {
     func testMalformedZIP64ExtraFieldDoesNotCrash() throws {
         // A local file header with ZIP64 sentinel sizes and an extra-field length
         // that claims 20 bytes of ZIP64 extra data the file doesn't actually contain.
-        // The sentinel patcher must not read past the end of the buffer.
         var bytes: [UInt8] = [0x50, 0x4B, 0x03, 0x04] // local file header signature
         bytes += Array(repeating: 0x00, count: 14)    // version…crc (offsets 4–17)
         bytes += [0xFF, 0xFF, 0xFF, 0xFF]             // compressed size = sentinel
@@ -354,13 +385,12 @@ final class ThreeMFParserTests: XCTestCase {
         bytes += [0x14, 0x00]                         // extra field length = 20 (but absent)
         let url = try writeTempFile(Data(bytes))
         defer { try? FileManager.default.removeItem(at: url) }
-        // Pre-fix this would read out of bounds; it must simply throw instead.
+        // It must simply fail to open.
         XCTAssertThrowsError(try ThreeMFParser.parse(fileAt: url))
     }
 
     func testZIP64SentinelSizesAreRead() throws {
-        // Such packages go through the in-memory patch rather than being read from disk;
-        // both a plain and a multi-file plate project must come out whole.
+        // Both a plain and a multi-file plate project must come out whole.
         let triangle = makeModelXML(
             vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
             triangles: [(0, 1, 2)]
@@ -387,6 +417,23 @@ final class ThreeMFParserTests: XCTestCase {
         let result = try parseArchive(plates)
         XCTAssertEqual(result.totalTriangles, 3)
         XCTAssertEqual(try result.loadingPlate(1)?.totalTriangles, 5)
+    }
+
+    func testZIP64SentinelOffsetsAreRead() throws {
+        // Upstream ZIPFoundation takes a ZIP64 local header offset of 0 to mean "absent" and
+        // falls back to the 32-bit sentinel, finding no entries at all in a package whose
+        // first entry has a sentinel offset. The pinned fork (cavoco/ZIPFoundation) fixes it.
+        let triangle = makeModelXML(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)]
+        )
+        for deflate in [false, true] {
+            let result = try parseArchive(MiniZIP.createArchive(entries: [
+                .init(path: "3D/3dmodel.model", data: triangle),
+                .init(path: "Metadata/other.txt", data: Data("x".utf8)),
+            ], deflate: deflate, zip64Offsets: true))
+            XCTAssertEqual(result.totalTriangles, 1)
+        }
     }
 
     func testParseCube() throws {
