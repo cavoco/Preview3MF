@@ -232,6 +232,17 @@ final class SceneBuilder {
         let normals = UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 9)
         let colors = triangleColors.map { _ in UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 12) }
 
+        // Painted meshes run to millions of triangles in a handful of colours, so the
+        // conversion to linear is redone only when the colour changes.
+        var lastColor = SIMD4<Float>(repeating: .nan), lastLinear = lastColor
+        func linear(_ color: SIMD4<Float>) -> SIMD4<Float> {
+            if color != lastColor {
+                lastColor = color
+                lastLinear = linearComponents(color)
+            }
+            return lastLinear
+        }
+
         var kept = 0
         for (i, tri) in triangles.enumerated() {
             let i0 = Int(tri.0), i1 = Int(tri.1), i2 = Int(tri.2)
@@ -249,7 +260,7 @@ final class SceneBuilder {
             write3(n, normal); write3(n + 3, normal); write3(n + 6, normal)
             if let colors, let (c0, c1, c2) = triangleColors?[i] {
                 let c = colors + kept * 12
-                write4(c, c0); write4(c + 4, c1); write4(c + 8, c2)
+                write4(c, linear(c0)); write4(c + 4, linear(c1)); write4(c + 8, linear(c2))
             }
             kept += 1
         }
@@ -294,7 +305,7 @@ final class SceneBuilder {
         if colors != nil {
             material.diffuse.contents = NSColor.white
         } else if let color = mesh.uniformColor {
-            material.diffuse.contents = linearColor(color)
+            material.diffuse.contents = materialColor(color)
         } else {
             material.diffuse.contents = NSColor(white: 0.75, alpha: 1.0)
         }
@@ -317,12 +328,19 @@ final class SceneBuilder {
         p[0] = v.x; p[1] = v.y; p[2] = v.z; p[3] = v.w
     }
 
-    /// A whole-mesh colour as a material colour that renders exactly as the same values do
-    /// as vertex colours, which SceneKit reads as linear. (The values are really sRGB, so
-    /// both render lighter than the filament; kept identical so the two paths agree.)
-    static func linearColor(_ color: SIMD4<Float>) -> NSColor {
-        let space = NSColorSpace(cgColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!)!
-        let components = [CGFloat(color.x), CGFloat(color.y), CGFloat(color.z), CGFloat(color.w)]
-        return NSColor(colorSpace: space, components: components, count: 4)
+    /// Colours in a 3MF are sRGB. SceneKit converts a material's `NSColor` to its linear
+    /// working space itself, but takes vertex colours as already linear, so those are
+    /// converted here; left alone they render washed out.
+    static func linearComponents(_ color: SIMD4<Float>) -> SIMD4<Float> {
+        func channel(_ c: Float) -> Float {
+            c <= 0.04045 ? c / 12.92 : powf((c + 0.055) / 1.055, 2.4)
+        }
+        return SIMD4(channel(color.x), channel(color.y), channel(color.z), color.w)
+    }
+
+    /// A whole-mesh colour as a material colour; renders as the same values do as
+    /// vertex colours.
+    static func materialColor(_ color: SIMD4<Float>) -> NSColor {
+        NSColor(srgbRed: CGFloat(color.x), green: CGFloat(color.y), blue: CGFloat(color.z), alpha: CGFloat(color.w))
     }
 }

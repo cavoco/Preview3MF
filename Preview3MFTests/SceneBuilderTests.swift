@@ -303,12 +303,12 @@ final class SceneBuilderTests: XCTestCase {
 
         XCTAssertNil(geometry.sources.first { $0.semantic == .color })
         let diffuse = try XCTUnwrap(geometry.firstMaterial?.diffuse.contents as? NSColor)
-        XCTAssertEqual(diffuse, SceneBuilder.linearColor(green))
+        XCTAssertEqual(diffuse, SceneBuilder.materialColor(green))
     }
 
     func testUniformColourRendersLikePerVertexColours() throws {
-        // SceneKit reads vertex colours as linear values; the material colour has to match
-        // that exactly, or slicer-coloured models would change shade.
+        // A single-colour mesh is drawn with a material and a painted one with vertex
+        // colours; the same colour has to come out the same shade either way.
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("No Metal device") }
         let renderer = SCNRenderer(device: device, options: nil)
         func centrePixel(_ mesh: MeshData) throws -> [Int] {
@@ -331,6 +331,23 @@ final class SceneBuilderTests: XCTestCase {
             perVertex.triangleColors = Array(repeating: (colour, colour, colour), count: 2)
             XCTAssertEqual(try centrePixel(uniform), try centrePixel(perVertex), "colour \(colour)")
         }
+    }
+
+    func testVertexColoursAreStoredLinear() throws {
+        // 3MF colours are sRGB; SceneKit takes vertex colours as linear, so the buffer
+        // must hold the converted values or filament colours render washed out.
+        let red = SIMD4<Float>(0.757, 0.180, 0.122, 0.5)
+        let mesh = MeshData(
+            vertices: [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)],
+            triangles: [(0, 1, 2)],
+            triangleColors: [(red, red, red)]
+        )
+        let source = try XCTUnwrap(SceneBuilder.buildGeometry(from: mesh).sources.first { $0.semantic == .color })
+        let stored = source.data.withUnsafeBytes { Array($0.bindMemory(to: Float.self).prefix(4)) }
+        XCTAssertEqual(stored[0], 0.5333, accuracy: 0.001)
+        XCTAssertEqual(stored[1], 0.0273, accuracy: 0.001)
+        XCTAssertEqual(stored[2], 0.0137, accuracy: 0.001)
+        XCTAssertEqual(stored[3], 0.5, "alpha is not gamma-encoded")
     }
 
     func testUncoloredGeometryHasNoColorSource() throws {
