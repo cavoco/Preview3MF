@@ -227,10 +227,13 @@ final class SceneBuilder {
         let vertices = mesh.vertices
         let triangles = mesh.triangles
         let triangleColors = mesh.triangleColors
+        let paints = triangleColors == nil ? mesh.paintedColors : nil
+        let paintPalette = mesh.paintColors.map(linearComponents)
 
         let positions = UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 9)
         let normals = UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 9)
-        let colors = triangleColors.map { _ in UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 12) }
+        let colors = triangleColors != nil || paints != nil
+            ? UnsafeMutablePointer<Float>.allocate(capacity: triangles.count * 12) : nil
 
         // Painted meshes run to millions of triangles in a handful of colours, so the
         // conversion to linear is redone only when the colour changes.
@@ -258,9 +261,15 @@ final class SceneBuilder {
             let p = positions + kept * 9, n = normals + kept * 9
             write3(p, v0); write3(p + 3, v1); write3(p + 6, v2)
             write3(n, normal); write3(n + 3, normal); write3(n + 6, normal)
-            if let colors, let (c0, c1, c2) = triangleColors?[i] {
+            if let colors {
                 let c = colors + kept * 12
-                write4(c, linear(c0)); write4(c + 4, linear(c1)); write4(c + 8, linear(c2))
+                if let (c0, c1, c2) = triangleColors?[i] {
+                    write4(c, linear(c0)); write4(c + 4, linear(c1)); write4(c + 8, linear(c2))
+                } else if let paints {
+                    let slot = Int(paints[i])
+                    let color = paintPalette[slot < paintPalette.count ? slot : 0]
+                    write4(c, color); write4(c + 4, color); write4(c + 8, color)
+                }
             }
             kept += 1
         }

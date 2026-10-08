@@ -12,12 +12,30 @@ struct MeshData {
     /// colours arrive this way, and spelling one out per triangle cost 48 bytes a triangle —
     /// 180 MB for a 3.8M-triangle plate.
     var uniformColor: SIMD4<Float>? = nil
+    /// The filament slot Bambu Studio / OrcaSlicer painted each triangle with, 0 where a
+    /// triangle is unpainted. A byte a triangle; `paintColors` turns a slot into a colour.
+    var trianglePaints: [UInt8]? = nil
+    /// The colours `trianglePaints` indexes: the unpainted colour first, then the filament
+    /// palette. Empty until the mesh is placed in a project whose palette is known.
+    var paintColors: [SIMD4<Float>] = []
 
-    var hasColors: Bool { triangleColors != nil || uniformColor != nil }
+    var hasColors: Bool { triangleColors != nil || uniformColor != nil || paintedColors != nil }
+
+    /// `trianglePaints`, once there is a palette to read it with.
+    var paintedColors: [UInt8]? { paintColors.isEmpty ? nil : trianglePaints }
+
+    /// The colour of a painted triangle's filament slot; a slot the palette lacks reads as unpainted.
+    func paintColor(_ slot: UInt8) -> SIMD4<Float> {
+        paintColors[Int(slot) < paintColors.count ? Int(slot) : 0]
+    }
 
     /// The colours of triangle `index`'s three vertices, or nil for an uncoloured mesh.
     func colors(ofTriangle index: Int) -> (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)? {
         if let triangleColors { return triangleColors[index] }
+        if let paints = paintedColors {
+            let color = paintColor(paints[index])
+            return (color, color, color)
+        }
         return uniformColor.map { ($0, $0, $0) }
     }
 }
@@ -541,7 +559,8 @@ private struct ModelFile {
                 meshes[id] = MeshData(
                     vertices: object.vertices,
                     triangles: object.triangles,
-                    triangleColors: object.triangleColors
+                    triangleColors: object.triangleColors,
+                    trianglePaints: object.trianglePaints
                 )
             }
             // Retain assembly containers even though they carry no mesh of their own.
@@ -662,6 +681,7 @@ private struct Assembly {
             if !mesh.hasColors, let color {
                 mesh.uniformColor = color
             }
+            applyPaint(to: &mesh, unpainted: color)
             out.append(BuildItem(mesh: mesh, transform: transform))
         }
         if let references = components[key] {
@@ -673,6 +693,25 @@ private struct Assembly {
             }
         }
         return out
+    }
+
+    /// Resolves filament slots painted onto a mesh's triangles against the project's
+    /// palette. Paint outranks the object's own filament, which only shows through where
+    /// a triangle is unpainted; colours from the model XML outrank both.
+    private func applyPaint(to mesh: inout MeshData, unpainted: SIMD4<Float>?) {
+        guard let paints = mesh.trianglePaints else { return }
+        guard mesh.triangleColors == nil, !project.filamentColors.isEmpty, let first = paints.first else {
+            mesh.trianglePaints = nil
+            return
+        }
+        mesh.paintColors = [unpainted ?? SIMD4<Float>(0.75, 0.75, 0.75, 1.0)] + project.filamentColors
+        // A whole object filled with one filament is the common case, and needs no
+        // per-triangle colours at all.
+        if paints.allSatisfy({ $0 == first }) {
+            mesh.uniformColor = mesh.paintColor(first)
+            mesh.trianglePaints = nil
+            mesh.paintColors = []
+        }
     }
 
     /// Everything, as for a package without plates: each build item, plus any mesh that
@@ -746,6 +785,8 @@ struct ParsedObject {
     var vertices: [SIMD3<Float>] = []
     var triangles: [(UInt32, UInt32, UInt32)] = []
     var triangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
+    /// Painted filament slot per triangle, when any triangle carries a `paint_color`.
+    var trianglePaints: [UInt8]?
     var components: [ObjectReference] = []
 }
 
@@ -834,6 +875,7 @@ final class FastModelParser {
     private var currentVertices: [SIMD3<Float>] = []
     private var currentTriangles: [(UInt32, UInt32, UInt32)] = []
     private var currentTriangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
+    private var currentTrianglePaints: [UInt8]?
     private var currentComponents: [ObjectReference] = []
     private var objectPID: Int?
     private var objectPIndex: Int?
@@ -959,10 +1001,11 @@ final class FastModelParser {
                             objects[id] = ParsedObject(vertices: currentVertices,
                                                        triangles: currentTriangles,
                                                        triangleColors: currentTriangleColors,
+                                                       trianglePaints: currentTrianglePaints,
                                                        components: currentComponents)
                         }
                         currentObjectID = nil; currentVertices = []; currentTriangles = []
-                        currentTriangleColors = nil; currentComponents = []
+                        currentTriangleColors = nil; currentTrianglePaints = nil; currentComponents = []
                         objectPID = nil; objectPIndex = nil
                     } else if nameIs(ns, nl, "basematerials") || nameIs(ns, nl, "colorgroup") {
                         if let id = currentGroupID { materialGroups[id] = currentGroupColors }
@@ -997,6 +1040,7 @@ final class FastModelParser {
                 } else if nameIs(ns, nl, "triangle") {
                     var v1 = -1, v2 = -1, v3 = -1
                     var pid: Int? = nil, p1: Int? = nil, p2: Int? = nil, p3: Int? = nil
+                    var paint: UInt8 = 0
                     forEachAttr(j, attrEnd) { an, al, vs in
                         if al == 2, bytes[an] == 0x76 {           // v1/v2/v3
                             switch bytes[an + 1] { case 0x31: v1 = d(vs); case 0x32: v2 = d(vs); case 0x33: v3 = d(vs); default: break }
@@ -1004,10 +1048,16 @@ final class FastModelParser {
                             switch bytes[an + 1] { case 0x31: p1 = d(vs); case 0x32: p2 = d(vs); case 0x33: p3 = d(vs); default: break }
                         } else if al == 3, nameIs(an, al, "pid") {
                             pid = d(vs)
+                        } else if al == 11, nameIs(an, al, "paint_color") {
+                            paint = Self.paintSlot(UnsafeBufferPointer(rebasing: bytes[vs..<valueEnd(vs)]))
                         }
                     }
                     if v1 >= 0, v2 >= 0, v3 >= 0 {
                         currentTriangles.append((UInt32(v1), UInt32(v2), UInt32(v3)))
+                        if paint != 0, currentTrianglePaints == nil {
+                            currentTrianglePaints = Array(repeating: 0, count: currentTriangles.count - 1)
+                        }
+                        currentTrianglePaints?.append(paint)
                         if !materialGroups.isEmpty {
                             if currentTriangleColors == nil {
                                 currentTriangleColors = Array(repeating: (defaultGray, defaultGray, defaultGray),
@@ -1032,7 +1082,8 @@ final class FastModelParser {
                         else if nameIs(an, al, "pid") { objectPID = d(vs) }
                         else if nameIs(an, al, "pindex") { objectPIndex = d(vs) }
                     }
-                    currentVertices = []; currentTriangles = []; currentTriangleColors = nil; currentComponents = []
+                    currentVertices = []; currentTriangles = []; currentTriangleColors = nil
+                    currentTrianglePaints = nil; currentComponents = []
                 } else if nameIs(ns, nl, "component") || nameIs(ns, nl, "item") {
                     // Both place an object, optionally one in another model file.
                     let isItem = nameIs(ns, nl, "item")
@@ -1067,7 +1118,7 @@ final class FastModelParser {
                     // Materials & Properties extension — the standard way to carry
                     // per-triangle colour, used by 3D Builder, Fusion and anything exporting
                     // conformant 3MF. (Bambu Studio and OrcaSlicer instead paint via a
-                    // proprietary `paint_color` triangle attribute, which this does not read.)
+                    // proprietary `paint_color` triangle attribute; see `paintSlot`.)
                     // Resource ids share a single space with <basematerials>, so triangles
                     // resolve to these through the same pid / p1..p3 lookup, no special casing.
                     forEachAttr(j, attrEnd) { an, al, vs in
@@ -1101,6 +1152,64 @@ final class FastModelParser {
                 metaCarriedText.append(contentsOf: UnsafeBufferPointer(rebasing: bytes[metaTextStart..<n]))
             }
         }
+    }
+
+    /// The filament slot a Bambu Studio / OrcaSlicer `paint_color` gives a triangle, or 0
+    /// for none.
+    ///
+    /// The value is hex, one nibble per node of a tree, read from the end of the string
+    /// backwards. A node's low two bits say how many of its sides are split (so it has one
+    /// more child than that); a node with none is a leaf and its high two bits are the
+    /// slot, with 3 meaning "3 plus the next nibble", and each 0xF there a further 15. So
+    /// "4" is slot 1, "8" slot 2, "0C" slot 3, "1C" slot 4.
+    ///
+    /// A triangle the brush only partly covered is split into smaller ones, each a leaf.
+    /// Those aren't rebuilt here: the triangle takes whichever slot covers most of it, so
+    /// a painted edge follows the mesh's own triangles rather than the brush stroke.
+    static func paintSlot(_ hex: UnsafeBufferPointer<UInt8>) -> UInt8 {
+        var position = hex.count
+        func nibble() -> Int? {
+            guard position > 0 else { return nil }
+            position -= 1
+            switch hex[position] {
+            case 0x30...0x39: return Int(hex[position]) - 0x30
+            case 0x41...0x46: return Int(hex[position]) - 0x41 + 10
+            case 0x61...0x66: return Int(hex[position]) - 0x61 + 10
+            default: return nil
+            }
+        }
+        func leafSlot(_ code: Int) -> Int {
+            var slot = code >> 2
+            guard slot == 3 else { return slot }
+            var next = nibble() ?? 0
+            while next == 15 {
+                slot += 15
+                next = nibble() ?? 0
+            }
+            return slot + next
+        }
+
+        guard let root = nibble() else { return 0 }
+        if root & 3 == 0 { return UInt8(clamping: leafSlot(root)) }
+
+        // Each child counts for an equal share of its parent, which is near enough to
+        // its share of the area to pick a winner.
+        var shares: [Int: Float] = [:]
+        func visit(_ code: Int, share: Float, depth: Int) {
+            let children = (code & 3) + 1
+            guard children > 1 else {
+                shares[leafSlot(code), default: 0] += share
+                return
+            }
+            guard depth < 32 else { return }
+            for _ in 0..<children {
+                guard let child = nibble() else { return }
+                visit(child, share: share / Float(children), depth: depth + 1)
+            }
+        }
+        visit(root, share: 1, depth: 0)
+        let winner = shares.max { ($0.value, -$0.key) < ($1.value, -$1.key) }
+        return UInt8(clamping: winner?.key ?? 0)
     }
 
     /// Minimal XML entity decode for metadata text (not in the hot path).

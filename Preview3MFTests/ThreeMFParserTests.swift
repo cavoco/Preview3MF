@@ -919,6 +919,7 @@ final class ThreeMFParserTests: XCTestCase {
         objects: [(id: Int, extruder: Int?, components: [Int])],
         meshes: [Int],
         negativeParts: [Int] = [],
+        paints: [Int: [String]] = [:],
         plates: [[Int]],
         plateNames: [String?] = [],
         projectSettings: [String: Any] = [:],
@@ -931,7 +932,13 @@ final class ThreeMFParserTests: XCTestCase {
         for meshID in meshes {
             model += "<object id=\"\(meshID)\" type=\"model\"><mesh><vertices>"
             model += "<vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/><vertex x=\"0\" y=\"1\" z=\"0\"/>"
-            model += "</vertices><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\"/></triangles></mesh></object>"
+            model += "</vertices><triangles>"
+            // One triangle per paint value ("" for unpainted), or a single plain one.
+            for paint in paints[meshID] ?? [""] {
+                model += "<triangle v1=\"0\" v2=\"1\" v3=\"2\""
+                model += paint.isEmpty ? "/>" : " paint_color=\"\(paint)\"/>"
+            }
+            model += "</triangles></mesh></object>"
         }
         for object in objects {
             model += "<object id=\"\(object.id)\" type=\"model\"><components>"
@@ -995,6 +1002,78 @@ final class ThreeMFParserTests: XCTestCase {
         let url = try writeTempFile(data)
         defer { try? FileManager.default.removeItem(at: url) }
         return try ThreeMFParser.parse(fileAt: url)
+    }
+
+    func testPaintColorDecodesToFilamentSlot() {
+        func slot(_ value: String) -> UInt8 {
+            Array(value.utf8).withUnsafeBufferPointer(FastModelParser.paintSlot)
+        }
+        XCTAssertEqual(slot("4"), 1)
+        XCTAssertEqual(slot("8"), 2)
+        XCTAssertEqual(slot("0C"), 3)
+        XCTAssertEqual(slot("1C"), 4)
+        XCTAssertEqual(slot("EC"), 17)
+        XCTAssertEqual(slot("0FC"), 18, "each 0xF adds a further 15")
+        XCTAssertEqual(slot("0"), 0, "an unpainted leaf")
+        XCTAssertEqual(slot(""), 0)
+        // A triangle split in three (read backwards: 2 = two sides split, then its leaves):
+        // two parts in slot 1, one in slot 2. It takes the slot covering most of it.
+        XCTAssertEqual(slot("8442"), 1)
+        // Split in two, one half split again: slot 2 holds a half, slots 1 and 3 a quarter each.
+        XCTAssertEqual(slot("0C4181"), 2)
+        XCTAssertEqual(slot("zz"), 0, "not hex")
+    }
+
+    func testPaintedFilamentOutranksTheObjectsOwn() throws {
+        // Filling a whole object with the paint bucket leaves its extruder at 1 and paints
+        // every triangle instead. With one slot throughout it stays a single colour.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#808000", "#008040", "#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            paints: [10: ["8", "8"]],
+            plates: [[2]]
+        ))
+        let mesh = try XCTUnwrap(result.items.first?.mesh)
+        XCTAssertNil(mesh.trianglePaints)
+        XCTAssertEqual(mesh.uniformColor, SIMD4<Float>(0, 128.0 / 255, 64.0 / 255, 1))
+    }
+
+    func testPartlyPaintedMeshKeepsTheObjectsFilamentWhereUnpainted() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#808000", "#008040", "#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            paints: [10: ["", "0C", "8", "7C"]],
+            plates: [[2]]
+        ))
+        let mesh = try XCTUnwrap(result.items.first?.mesh)
+        XCTAssertEqual(mesh.trianglePaints, [0, 3, 2, 10])
+        let olive = SIMD4<Float>(128.0 / 255, 128.0 / 255, 0, 1)
+        XCTAssertEqual(mesh.colors(ofTriangle: 0)?.0, olive, "unpainted: the object's filament")
+        XCTAssertEqual(mesh.colors(ofTriangle: 1)?.0, SIMD4<Float>(1, 0, 0, 1))
+        XCTAssertEqual(mesh.colors(ofTriangle: 2)?.0, SIMD4<Float>(0, 128.0 / 255, 64.0 / 255, 1))
+        XCTAssertEqual(mesh.colors(ofTriangle: 3)?.0, olive, "a slot the palette lacks")
+        XCTAssertTrue(result.hasColors)
+
+        let geometry = SceneBuilder.buildGeometry(from: mesh)
+        let source = try XCTUnwrap(geometry.sources.first { $0.semantic == .color })
+        XCTAssertEqual(source.vectorCount, 12)
+        let stored = source.data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        XCTAssertEqual(Array(stored[12..<16]), [1, 0, 0, 1], "the second triangle is red")
+    }
+
+    func testPaintIsIgnoredWithoutAPalette() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: [],
+            objects: [(id: 2, extruder: nil, components: [10])],
+            meshes: [10],
+            paints: [10: ["8", "4"]],
+            plates: [[2]]
+        ))
+        let mesh = try XCTUnwrap(result.items.first?.mesh)
+        XCTAssertNil(mesh.trianglePaints)
+        XCTAssertFalse(mesh.hasColors)
     }
 
     func testSlicerFilamentColoursApplyPerObject() throws {
