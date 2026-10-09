@@ -30,6 +30,8 @@ class ThumbnailProvider: QLThumbnailProvider {
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             let scene = SceneBuilder.buildScene(from: result.items, showBuildPlate: false)
+            // An icon sits on whatever Finder draws behind it; keep the plain white card.
+            scene.background.contents = NSColor.white
 
             // Strip any animations (rotation) — we want a static snapshot
             scene.rootNode.enumerateChildNodes { node, _ in

@@ -225,16 +225,19 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         let appearance = currentAppearance
         let foreground = appearance == .dark
             ? NSColor(white: 0.8, alpha: 1.0)
-            : NSColor(white: 0.3, alpha: 1.0)
+            : NSColor(white: 0.2, alpha: 1.0)
 
         // Text first. It costs nothing to set, and paging should feel immediate even
         // though rebuilding the geometry behind it does not.
         infoLabel.textColor = foreground
         infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground)
         plateLabel.textColor = foreground
-        let overlayBackground = NSColor(white: appearance == .dark ? 0 : 1, alpha: 0.5).cgColor
-        plateControl.layer?.backgroundColor = overlayBackground
-        viewControl.layer?.backgroundColor = overlayBackground
+        let overlayBackground = appearance == .dark
+            ? NSColor(white: 0, alpha: 0.5)
+            : NSColor(white: 1, alpha: 0.6)
+        infoLabel.backgroundColor = overlayBackground
+        plateControl.layer?.backgroundColor = overlayBackground.cgColor
+        viewControl.layer?.backgroundColor = overlayBackground.cgColor
         spinButton.contentTintColor = foreground
 
         // Only worth showing when there is somewhere to page to.

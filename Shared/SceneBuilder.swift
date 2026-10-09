@@ -26,9 +26,11 @@ final class SceneBuilder {
         let scene = SCNScene()
 
         let isDark = appearance == .dark
+        // Light grey rather than white in light mode: white and pale filaments are common,
+        // and on a white background they all but disappear.
         scene.background.contents = isDark
             ? NSColor(white: 0.15, alpha: 1.0)
-            : NSColor.white
+            : NSColor(white: 0.88, alpha: 1.0)
 
         // 3MF is Z-up; SceneKit is Y-up. Rotate the whole assembly -90° about X so the
         // build plate lies flat in the XZ plane and the print height runs up the screen.
@@ -191,10 +193,10 @@ final class SceneBuilder {
 
         let minorColor = isDark
             ? NSColor(white: 0.30, alpha: 1.0)
-            : NSColor(white: 0.82, alpha: 1.0)
+            : NSColor(white: 0.76, alpha: 1.0)
         let majorColor = isDark
             ? NSColor(white: 0.50, alpha: 1.0)
-            : NSColor(white: 0.55, alpha: 1.0)
+            : NSColor(white: 0.56, alpha: 1.0)
 
         let node = SCNNode()
         node.addChildNode(makeLineNode(vertices: minorVerts, color: minorColor))
