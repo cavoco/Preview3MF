@@ -18,6 +18,10 @@ struct MeshData {
     /// The colours `trianglePaints` indexes: the unpainted colour first, then the filament
     /// palette. Empty until the mesh is placed in a project whose palette is known.
     var paintColors: [SIMD4<Float>] = []
+    /// How many triangles and vertices were added to draw paint that covers only part of
+    /// a triangle, so the totals shown can stay those of the model itself.
+    var paintAddedTriangles = 0
+    var paintAddedVertices = 0
 
     var hasColors: Bool { triangleColors != nil || uniformColor != nil || paintedColors != nil }
 
@@ -113,11 +117,11 @@ struct ParseResult {
     }
 
     var totalTriangles: Int {
-        items.reduce(0) { $0 + $1.mesh.triangles.count }
+        items.reduce(0) { $0 + $1.mesh.triangles.count - $1.mesh.paintAddedTriangles }
     }
 
     var totalVertices: Int {
-        items.reduce(0) { $0 + $1.mesh.vertices.count }
+        items.reduce(0) { $0 + $1.mesh.vertices.count - $1.mesh.paintAddedVertices }
     }
 
     var objectCount: Int {
@@ -560,7 +564,9 @@ private struct ModelFile {
                     vertices: object.vertices,
                     triangles: object.triangles,
                     triangleColors: object.triangleColors,
-                    trianglePaints: object.trianglePaints
+                    trianglePaints: object.trianglePaints,
+                    paintAddedTriangles: object.paintAddedTriangles,
+                    paintAddedVertices: object.paintAddedVertices
                 )
             }
             // Retain assembly containers even though they carry no mesh of their own.
@@ -787,6 +793,9 @@ struct ParsedObject {
     var triangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
     /// Painted filament slot per triangle, when any triangle carries a `paint_color`.
     var trianglePaints: [UInt8]?
+    /// Triangles and vertices beyond the file's own, from splitting partly painted triangles.
+    var paintAddedTriangles = 0
+    var paintAddedVertices = 0
     var components: [ObjectReference] = []
 }
 
@@ -876,6 +885,10 @@ final class FastModelParser {
     private var currentTriangles: [(UInt32, UInt32, UInt32)] = []
     private var currentTriangleColors: [(SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)]?
     private var currentTrianglePaints: [UInt8]?
+    private var currentPaintAddedTriangles = 0
+    private var currentPaintAddedVertices = 0
+    /// The pieces of the triangle being read, when paint covers only part of it.
+    private var paintPieces: [PaintPiece] = []
     private var currentComponents: [ObjectReference] = []
     private var objectPID: Int?
     private var objectPIndex: Int?
@@ -1002,10 +1015,13 @@ final class FastModelParser {
                                                        triangles: currentTriangles,
                                                        triangleColors: currentTriangleColors,
                                                        trianglePaints: currentTrianglePaints,
+                                                       paintAddedTriangles: currentPaintAddedTriangles,
+                                                       paintAddedVertices: currentPaintAddedVertices,
                                                        components: currentComponents)
                         }
                         currentObjectID = nil; currentVertices = []; currentTriangles = []
                         currentTriangleColors = nil; currentTrianglePaints = nil; currentComponents = []
+                        currentPaintAddedTriangles = 0; currentPaintAddedVertices = 0
                         objectPID = nil; objectPIndex = nil
                     } else if nameIs(ns, nl, "basematerials") || nameIs(ns, nl, "colorgroup") {
                         if let id = currentGroupID { materialGroups[id] = currentGroupColors }
@@ -1040,7 +1056,7 @@ final class FastModelParser {
                 } else if nameIs(ns, nl, "triangle") {
                     var v1 = -1, v2 = -1, v3 = -1
                     var pid: Int? = nil, p1: Int? = nil, p2: Int? = nil, p3: Int? = nil
-                    var paint: UInt8 = 0
+                    var paintStart = 0, paintEnd = 0
                     forEachAttr(j, attrEnd) { an, al, vs in
                         if al == 2, bytes[an] == 0x76 {           // v1/v2/v3
                             switch bytes[an + 1] { case 0x31: v1 = d(vs); case 0x32: v2 = d(vs); case 0x33: v3 = d(vs); default: break }
@@ -1049,19 +1065,48 @@ final class FastModelParser {
                         } else if al == 3, nameIs(an, al, "pid") {
                             pid = d(vs)
                         } else if al == 11, nameIs(an, al, "paint_color") {
-                            paint = Self.paintSlot(UnsafeBufferPointer(rebasing: bytes[vs..<valueEnd(vs)]))
+                            paintStart = vs; paintEnd = valueEnd(vs)
                         }
                     }
                     if v1 >= 0, v2 >= 0, v3 >= 0 {
-                        currentTriangles.append((UInt32(v1), UInt32(v2), UInt32(v3)))
-                        if paint != 0, currentTrianglePaints == nil {
-                            currentTrianglePaints = Array(repeating: 0, count: currentTriangles.count - 1)
+                        var paint: UInt8 = 0
+                        paintPieces.removeAll(keepingCapacity: true)
+                        if paintEnd > paintStart {
+                            let hex = UnsafeBufferPointer(rebasing: bytes[paintStart..<paintEnd])
+                            let count = currentVertices.count
+                            // Paint over part of a triangle needs its corners, which a
+                            // malformed file may not have given.
+                            if v1 < count, v2 < count, v3 < count {
+                                paint = Self.paintSlot(hex, corners: (currentVertices[v1], currentVertices[v2], currentVertices[v3]),
+                                                       pieces: &paintPieces)
+                            } else {
+                                paint = Self.paintSlot(hex)
+                            }
                         }
-                        currentTrianglePaints?.append(paint)
+                        let added = max(paintPieces.count, 1)
+                        if paintPieces.isEmpty {
+                            currentTriangles.append((UInt32(v1), UInt32(v2), UInt32(v3)))
+                        } else {
+                            for piece in paintPieces {
+                                let first = UInt32(currentVertices.count)
+                                currentVertices.append(piece.a); currentVertices.append(piece.b); currentVertices.append(piece.c)
+                                currentTriangles.append((first, first + 1, first + 2))
+                            }
+                            currentPaintAddedTriangles += added - 1
+                            currentPaintAddedVertices += added * 3
+                        }
+                        if currentTrianglePaints == nil, paint != 0 || !paintPieces.isEmpty {
+                            currentTrianglePaints = Array(repeating: 0, count: currentTriangles.count - added)
+                        }
+                        if paintPieces.isEmpty {
+                            currentTrianglePaints?.append(paint)
+                        } else {
+                            for piece in paintPieces { currentTrianglePaints!.append(piece.slot) }
+                        }
                         if !materialGroups.isEmpty {
                             if currentTriangleColors == nil {
                                 currentTriangleColors = Array(repeating: (defaultGray, defaultGray, defaultGray),
-                                                              count: currentTriangles.count - 1)
+                                                              count: currentTriangles.count - added)
                             }
                             let triPID = pid ?? objectPID
                             var c0 = defaultGray, c1 = defaultGray, c2 = defaultGray
@@ -1073,7 +1118,9 @@ final class FastModelParser {
                                 if let idx = i2, idx >= 0, idx < group.count { c1 = group[idx] }
                                 if let idx = i3, idx >= 0, idx < group.count { c2 = group[idx] }
                             }
-                            currentTriangleColors!.append((c0, c1, c2))
+                            // Model colours outrank paint, so the pieces of a split triangle
+                            // only need something of the right length here.
+                            for _ in 0..<added { currentTriangleColors!.append((c0, c1, c2)) }
                         }
                     }
                 } else if nameIs(ns, nl, "object") {
@@ -1084,6 +1131,7 @@ final class FastModelParser {
                     }
                     currentVertices = []; currentTriangles = []; currentTriangleColors = nil
                     currentTrianglePaints = nil; currentComponents = []
+                    currentPaintAddedTriangles = 0; currentPaintAddedVertices = 0
                 } else if nameIs(ns, nl, "component") || nameIs(ns, nl, "item") {
                     // Both place an object, optionally one in another model file.
                     let isItem = nameIs(ns, nl, "item")
@@ -1154,6 +1202,12 @@ final class FastModelParser {
         }
     }
 
+    /// A piece of a triangle that paint covers only part of, and the filament slot it is in.
+    struct PaintPiece {
+        var a, b, c: SIMD3<Float>
+        var slot: UInt8
+    }
+
     /// The filament slot a Bambu Studio / OrcaSlicer `paint_color` gives a triangle, or 0
     /// for none.
     ///
@@ -1164,9 +1218,14 @@ final class FastModelParser {
     /// "4" is slot 1, "8" slot 2, "0C" slot 3, "1C" slot 4.
     ///
     /// A triangle the brush only partly covered is split into smaller ones, each a leaf.
-    /// Those aren't rebuilt here: the triangle takes whichever slot covers most of it, so
-    /// a painted edge follows the mesh's own triangles rather than the brush stroke.
-    static func paintSlot(_ hex: UnsafeBufferPointer<UInt8>) -> UInt8 {
+    /// Given the triangle's `corners`, those are rebuilt into `pieces` and the result is 0;
+    /// `pieces` stays empty when one slot covers the whole triangle. A split node's high
+    /// two bits name the corner the split starts from: one side split halves the side
+    /// opposite it, two split the sides meeting at it, three split them all into four.
+    /// Its children are written last first.
+    static func paintSlot(_ hex: UnsafeBufferPointer<UInt8>,
+                          corners: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)? = nil,
+                          pieces: inout [PaintPiece]) -> UInt8 {
         var position = hex.count
         func nibble() -> Int? {
             guard position > 0 else { return nil }
@@ -1178,38 +1237,63 @@ final class FastModelParser {
             default: return nil
             }
         }
-        func leafSlot(_ code: Int) -> Int {
+        func leafSlot(_ code: Int) -> UInt8 {
             var slot = code >> 2
-            guard slot == 3 else { return slot }
+            guard slot == 3 else { return UInt8(slot) }
             var next = nibble() ?? 0
             while next == 15 {
                 slot += 15
                 next = nibble() ?? 0
             }
-            return slot + next
+            return UInt8(clamping: slot + next)
         }
 
         guard let root = nibble() else { return 0 }
-        if root & 3 == 0 { return UInt8(clamping: leafSlot(root)) }
+        guard root & 3 != 0, let corners else { return root & 3 == 0 ? leafSlot(root) : 0 }
 
-        // Each child counts for an equal share of its parent, which is near enough to
-        // its share of the area to pick a winner.
-        var shares: [Int: Float] = [:]
-        func visit(_ code: Int, share: Float, depth: Int) {
-            let children = (code & 3) + 1
-            guard children > 1 else {
-                shares[leafSlot(code), default: 0] += share
-                return
+        typealias Corners = (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)
+        /// The slot covering all of this node, or nil once its parts have gone to `pieces`.
+        /// Parts in the same slot are left whole, so a brush stroke only splits the
+        /// triangles along its edge.
+        func visit(_ code: Int, _ t: Corners, depth: Int) -> UInt8? {
+            let sides = code & 3
+            guard sides > 0 else { return leafSlot(code) }
+            guard depth < 32 else { return 0 }
+            let v0: SIMD3<Float>, v1: SIMD3<Float>, v2: SIMD3<Float>
+            switch code >> 2 {
+            case 1: (v0, v1, v2) = (t.1, t.2, t.0)
+            case 2: (v0, v1, v2) = (t.2, t.0, t.1)
+            default: (v0, v1, v2) = t
             }
-            guard depth < 32 else { return }
-            for _ in 0..<children {
-                guard let child = nibble() else { return }
-                visit(child, share: share / Float(children), depth: depth + 1)
+            let children: [Corners]
+            switch sides {
+            case 1:
+                let m = (v1 + v2) / 2
+                children = [(v0, v1, m), (m, v2, v0)]
+            case 2:
+                let m01 = (v0 + v1) / 2, m02 = (v0 + v2) / 2
+                children = [(v0, m01, m02), (m01, v1, m02), (v1, v2, m02)]
+            default:
+                let m01 = (v0 + v1) / 2, m12 = (v1 + v2) / 2, m20 = (v2 + v0) / 2
+                children = [(v0, m01, m20), (m01, v1, m12), (m12, v2, m20), (m01, m12, m20)]
             }
+            var slots = [UInt8?](repeating: 0, count: children.count)
+            for index in children.indices.reversed() {
+                slots[index] = visit(nibble() ?? 0, children[index], depth: depth + 1)
+            }
+            if let first = slots[0], slots.allSatisfy({ $0 == first }) { return first }
+            for (child, slot) in zip(children, slots) {
+                if let slot { pieces.append(PaintPiece(a: child.0, b: child.1, c: child.2, slot: slot)) }
+            }
+            return nil
         }
-        visit(root, share: 1, depth: 0)
-        let winner = shares.max { ($0.value, -$0.key) < ($1.value, -$1.key) }
-        return UInt8(clamping: winner?.key ?? 0)
+        return visit(root, corners, depth: 0) ?? 0
+    }
+
+    /// The slot of a `paint_color` without a triangle to split: 0 where paint covers only part.
+    static func paintSlot(_ hex: UnsafeBufferPointer<UInt8>) -> UInt8 {
+        var none: [PaintPiece] = []
+        return paintSlot(hex, corners: nil, pieces: &none)
     }
 
     /// Minimal XML entity decode for metadata text (not in the hot path).

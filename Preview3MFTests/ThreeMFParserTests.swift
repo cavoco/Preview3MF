@@ -1016,12 +1016,65 @@ final class ThreeMFParserTests: XCTestCase {
         XCTAssertEqual(slot("0FC"), 18, "each 0xF adds a further 15")
         XCTAssertEqual(slot("0"), 0, "an unpainted leaf")
         XCTAssertEqual(slot(""), 0)
-        // A triangle split in three (read backwards: 2 = two sides split, then its leaves):
-        // two parts in slot 1, one in slot 2. It takes the slot covering most of it.
-        XCTAssertEqual(slot("8442"), 1)
-        // Split in two, one half split again: slot 2 holds a half, slots 1 and 3 a quarter each.
-        XCTAssertEqual(slot("0C4181"), 2)
+        // Paint over part of a triangle has no single slot without the triangle to split.
+        XCTAssertEqual(slot("8442"), 0)
         XCTAssertEqual(slot("zz"), 0, "not hex")
+    }
+
+    func testPartlyPaintedTriangleIsSplitAlongThePaint() {
+        let corners = (SIMD3<Float>(0, 0, 0), SIMD3<Float>(2, 0, 0), SIMD3<Float>(0, 2, 0))
+        func split(_ value: String) -> (slot: UInt8, pieces: [FastModelParser.PaintPiece]) {
+            var pieces: [FastModelParser.PaintPiece] = []
+            let slot = Array(value.utf8).withUnsafeBufferPointer {
+                FastModelParser.paintSlot($0, corners: corners, pieces: &pieces)
+            }
+            return (slot, pieces)
+        }
+
+        // Read backwards: 2 = the two sides meeting at the first corner are split, then
+        // the three parts last first: slot 1, slot 1, slot 2.
+        let three = split("8442").pieces
+        XCTAssertEqual(three.map(\.slot), [2, 1, 1])
+        XCTAssertEqual([three[0].a, three[0].b, three[0].c],
+                       [SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(0, 1, 0)], "the corner the split starts from")
+        XCTAssertEqual([three[2].a, three[2].b, three[2].c],
+                       [SIMD3(2, 0, 0), SIMD3(0, 2, 0), SIMD3(0, 1, 0)])
+
+        // 6 = the same split starting from the second corner.
+        let turned = split("8446").pieces
+        XCTAssertEqual([turned[0].a, turned[0].b, turned[0].c],
+                       [SIMD3(2, 0, 0), SIMD3(1, 1, 0), SIMD3(1, 0, 0)])
+
+        // One side split, and the second half split again: slots 3 and 1 in the quarters.
+        let nested = split("80C411").pieces
+        XCTAssertEqual(nested.map(\.slot), [3, 1, 2])
+        XCTAssertEqual([nested[2].a, nested[2].b, nested[2].c],
+                       [SIMD3(0, 0, 0), SIMD3(2, 0, 0), SIMD3(1, 1, 0)], "the unsplit half")
+
+        // Parts that came out the same colour need no splitting.
+        let whole = split("84411")
+        XCTAssertEqual(whole.slot, 0)
+        XCTAssertEqual(whole.pieces.map(\.slot), [2, 1], "one half whole, not its two quarters")
+        XCTAssertEqual(split("441").slot, 1)
+        XCTAssertTrue(split("441").pieces.isEmpty)
+        XCTAssertEqual(split("4443").pieces.map(\.slot), [0, 1, 1, 1], "cut short: unpainted from there")
+    }
+
+    func testSplitPaintLeavesTheModelsOwnCountsAlone() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#808000", "#008040", "#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10])],
+            meshes: [10],
+            paints: [10: ["", "8442", "0C"]],
+            plates: [[2]]
+        ))
+        let mesh = try XCTUnwrap(result.items.first?.mesh)
+        XCTAssertEqual(mesh.trianglePaints, [0, 2, 1, 1, 3])
+        XCTAssertEqual(mesh.triangles.count, 5)
+        XCTAssertEqual(result.totalTriangles, 3)
+        XCTAssertEqual(result.totalVertices, 3)
+        XCTAssertEqual(mesh.colors(ofTriangle: 1)?.0, SIMD4<Float>(0, 128.0 / 255, 64.0 / 255, 1))
+        XCTAssertEqual(mesh.colors(ofTriangle: 2)?.0, SIMD4<Float>(128.0 / 255, 128.0 / 255, 0, 1))
     }
 
     func testPaintedFilamentOutranksTheObjectsOwn() throws {
