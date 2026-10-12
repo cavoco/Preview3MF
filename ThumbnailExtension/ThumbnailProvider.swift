@@ -18,7 +18,7 @@ class ThumbnailProvider: QLThumbnailProvider {
             let reply = QLThumbnailReply(contextSize: maximumSize, drawing: { context -> Bool in
                 let drawRect = ThumbnailProvider.aspectFit(
                     imageSize: imageSize,
-                    in: CGRect(origin: .zero, size: maximumSize)
+                    in: ThumbnailProvider.bounds(of: context)
                 )
                 context.draw(cgImage, in: drawRect)
                 return true
@@ -49,7 +49,7 @@ class ThumbnailProvider: QLThumbnailProvider {
             let image = renderer.snapshot(atTime: 0, with: pixelSize, antialiasingMode: .multisampling4X)
 
             let reply = QLThumbnailReply(contextSize: maximumSize, drawing: { context -> Bool in
-                let drawRect = CGRect(origin: .zero, size: maximumSize)
+                let drawRect = ThumbnailProvider.bounds(of: context)
                 guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                     return false
                 }
@@ -61,6 +61,17 @@ class ThumbnailProvider: QLThumbnailProvider {
         } catch {
             handler(nil, error)
         }
+    }
+
+    /// The whole of a thumbnail's drawing context, in the units it draws in.
+    ///
+    /// Not assumed to be the requested size in points: on a Retina display the context can
+    /// arrive measured in pixels, and a thumbnail drawn at the point size then fills only
+    /// the bottom-left quarter of its card.
+    private static func bounds(of context: CGContext) -> CGRect {
+        CGRect(x: 0, y: 0, width: context.width, height: context.height)
+            .applying(context.ctm.inverted())
+            .standardized
     }
 
     private static func aspectFit(imageSize: CGSize, in rect: CGRect) -> CGRect {
