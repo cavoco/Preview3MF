@@ -102,6 +102,12 @@ struct ContentView: View {
                     .foregroundColor(.red)
                     .font(.caption)
             }
+
+            HStack(spacing: 16) {
+                Link("Star on GitHub", destination: ProjectLinks.repository)
+                Link("Report a problem", destination: ProjectLinks.reportProblem)
+            }
+            .font(.caption)
         }
         .padding(24)
         .frame(minWidth: 500, minHeight: 500)

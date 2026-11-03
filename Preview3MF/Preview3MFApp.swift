@@ -46,6 +46,24 @@ struct UpdateSettingsView: View {
     }
 }
 
+/// Where the app points people back to the project.
+enum ProjectLinks {
+    static let repository = URL(string: "https://github.com/cavoco/Preview3MF")!
+
+    /// A new issue with the app and macOS versions already filled in.
+    static var reportProblem: URL {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let macOS = ProcessInfo.processInfo.operatingSystemVersionString
+        var components = URLComponents(url: repository.appendingPathComponent("issues/new"),
+                                       resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(
+            name: "body",
+            value: "Preview3MF \(version), macOS \(macOS)\n\nWhat happened:\n"
+        )]
+        return components.url!
+    }
+}
+
 @main
 struct Preview3MFApp: App {
     @StateObject private var updater = UpdaterModel()
@@ -60,6 +78,10 @@ struct Preview3MFApp: App {
                     updater.controller.checkForUpdates(nil)
                 }
                 .disabled(!updater.canCheckForUpdates)
+            }
+            CommandGroup(replacing: .help) {
+                Link("Star on GitHub", destination: ProjectLinks.repository)
+                Link("Report a Problem…", destination: ProjectLinks.reportProblem)
             }
         }
 
