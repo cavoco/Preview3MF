@@ -13,20 +13,23 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 
 - **Quick Look integration** — press Space in Finder to preview `.3mf` files
 - **3D rendering** with SceneKit — proper lighting, shading, and materials
-- **Build plate** — Bambu Studio / OrcaSlicer projects sit on the printer's real bed, sized
-  from the project's printable area; other files get a grid scaled to the model's footprint.
+- **Build plate** — Bambu Studio / OrcaSlicer / PrusaSlicer projects sit on the printer's real bed, sized
+  from the project's bed shape; other files get a grid scaled to the model's footprint.
   Either way it turns with the model like a turntable
 - **Auto-rotating model** — spins around the vertical axis so you can see all sides, with a
   pause/resume button to freeze it at any angle
 - **Interactive controls** — orbit and zoom with your mouse/trackpad in the preview
 - **Model info overlay** — triangle count, object count, and dimensions parsed from the file,
-  plus the print profile for Bambu Studio / OrcaSlicer projects (printer, nozzle, layer
+  plus the print profile for Bambu Studio / OrcaSlicer / PrusaSlicer projects (printer, nozzle, layer
   height, filament, infill, supports) and, once a plate has been sliced, its estimated print
   time and filament weight
 - **Color support** — renders per-object/per-triangle colors from both `<basematerials>`
   and the 3MF Materials & Properties extension (`<m:colorgroup>`), with or without a
   namespace prefix
-- **Dark mode** — preview and host app adapt to the system appearance
+- **Painted colours** — colours brushed onto a model in Bambu Studio, OrcaSlicer or PrusaSlicer show up,
+  following the brush even where paint covers only part of a triangle
+- **Light and dark mode** — preview and host app follow the system appearance; light mode uses
+  a grey backdrop so pale models stay visible
 - **Finder thumbnails** — rendered icons for `.3mf` files, reusing the slicer's embedded preview when available
 - **Multi-object support** — handles files with multiple mesh objects (Bambu Studio, PrusaSlicer, etc.)
 - **Slicer project files** — reads Bambu Studio / OrcaSlicer projects properly: filament
@@ -35,8 +38,12 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
 - **Plate paging** — multi-plate projects show a `‹ Plate 1/3 ›` control, named where the
   slicer named the plate. In the app window the left/right arrow keys work too; in Quick
   Look they don't, because the preview panel uses them to step through the Finder selection
+- **Large projects** — only the plate on screen is parsed, the next one is loaded ahead of
+  time, and ZIP64 packages open
 - **Drag-and-drop** — drop `.3mf` files into the host app for inline preview
 - **Automatic updates** — signed updates delivered through Sparkle
+- **Help links** — star the project or report a problem from the Help menu or the foot of the
+  window; a report opens a GitHub issue with the app and macOS versions filled in
 
 ## Installation
 
@@ -123,9 +130,14 @@ none is present.
 
 Full history and downloads are on the [Releases page](https://github.com/cavoco/Preview3MF/releases). Recent highlights:
 
-- **v1.0.17** — scroll-wheel zoom in the 3D preview and host app; slicer metadata sanitized to plain text
-- **v1.0.16** — signed & notarized builds so Gatekeeper opens the app without warnings
-- **v1.0.14** — steadier auto-spin in the host app's drag-and-drop preview
+- **v1.0.27** — painted colours from Bambu Studio / OrcaSlicer; grey backdrop in light mode; Finder thumbnails fill the whole card
+- **v1.0.26** — large projects load faster (only the shown plate is parsed); ZIP64 packages open; filament colours no longer washed out
+- **v1.0.25** — estimated print time and filament weight per sliced plate, with a per-filament breakdown
+- **v1.0.24** — build plate drawn at the printer's real bed size; Quick Look works when Bambu Studio or Shapr3D has claimed `.3mf`
+- **v1.0.23** — print profile in the info overlay; pause/resume for the auto-rotation; build plate turns with the model
+- **v1.0.21** — Bambu Studio / OrcaSlicer projects: filament colours, one plate at a time, `‹ Plate 1/3 ›` paging
+- **v1.0.18** — automatic updates through Sparkle
+- **v1.0.17** — scroll-wheel zoom in the 3D preview and host app
 
 ## License
 
