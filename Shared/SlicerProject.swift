@@ -11,6 +11,10 @@ import ZIPFoundation
 /// - once a plate has been sliced, its estimated print time and filament weight, in
 ///   `slice_info.config` (XML)
 ///
+/// PrusaSlicer keeps its palette and object extruders in files of its own instead,
+/// `Slic3r_PE.config` and `Slic3r_PE_model.config`; those are read when the Bambu ones are
+/// absent.
+///
 /// None of this is part of the 3MF spec, so everything here is best-effort: a missing or
 /// malformed file yields an empty value and the caller falls back to its previous behaviour.
 struct SlicerProject {
@@ -18,6 +22,9 @@ struct SlicerProject {
     var filamentColors: [SIMD4<Float>] = []
     /// Object id → 1-based extruder slot.
     var objectExtruder: [Int: Int] = [:]
+    /// The slot an object without one of its own prints with. PrusaSlicer only records an
+    /// extruder an object was given, and prints the rest with the first.
+    var defaultExtruder: Int?
     /// Object ids that are subtractive — boolean cutting tools, not printed geometry.
     var negativeParts: Set<Int> = []
     /// Build plates in file order.
@@ -42,7 +49,9 @@ struct SlicerProject {
 
     /// The filament colour assigned to an object, if the slot resolves to a known filament.
     func color(forObject id: Int) -> SIMD4<Float>? {
-        guard let slot = objectExtruder[id], slot >= 1, slot <= filamentColors.count else {
+        var slot = objectExtruder[id] ?? 0
+        if slot == 0, let defaultExtruder { slot = defaultExtruder }
+        guard slot >= 1, slot <= filamentColors.count else {
             return nil
         }
         return filamentColors[slot - 1]
@@ -60,8 +69,14 @@ struct SlicerProject {
         if let data = entryData(archive, "Metadata/project_settings.config") {
             project.filamentColors = filamentColors(fromProjectSettings: data)
             project.printSettings = PrintSettings(projectSettings: data)
+        } else if let data = entryData(archive, "Metadata/Slic3r_PE.config") {
+            let values = prusaConfigValues(data)
+            project.filamentColors = filamentColors(fromPrusaConfig: values)
+            project.printSettings = PrintSettings(prusaConfig: values)
+            if !project.filamentColors.isEmpty { project.defaultExtruder = 1 }
         }
-        if let data = entryData(archive, "Metadata/model_settings.config") {
+        if let data = entryData(archive, "Metadata/model_settings.config")
+            ?? entryData(archive, "Metadata/Slic3r_PE_model.config") {
             let delegate = ModelSettingsDelegate()
             let parser = XMLParser(data: data)
             parser.delegate = delegate
@@ -80,9 +95,10 @@ struct SlicerProject {
             }
         }
         // The palette lists every loaded filament slot, not just the ones this model prints
-        // with. Narrow the types to slots an object actually uses, when that is known.
+        // with. Narrow the types to slots an object actually uses, when that is known —
+        // which it is not where objects can fall back to a default slot unrecorded.
         let usedSlots = Set(project.objectExtruder.values)
-        if !usedSlots.isEmpty, project.printSettings.filamentTypes.count > 1 {
+        if !usedSlots.isEmpty, project.defaultExtruder == nil, project.printSettings.filamentTypes.count > 1 {
             let types = project.printSettings.filamentTypes.enumerated()
                 .filter { usedSlots.contains($0.offset + 1) }
                 .map(\.element)
@@ -111,6 +127,43 @@ struct SlicerProject {
         }
         // A slot we cannot parse still has to occupy its index, or every later slot shifts.
         return raw.map { FastModelParser.parseDisplayColor($0) ?? SIMD4<Float>(0.75, 0.75, 0.75, 1.0) }
+    }
+
+    /// `Slic3r_PE.config` is PrusaSlicer's flat profile, one `; key = value` line per
+    /// setting: `; layer_height = 0.2`. Values are kept raw; lists are split by whoever reads
+    /// them, as strings are joined by `;` but numbers by `,`.
+    static func prusaConfigValues(_ data: Data) -> [String: String] {
+        var values: [String: String] = [:]
+        for line in String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline) {
+            var text = Substring(line)
+            if text.hasPrefix(";") { text = text.dropFirst() }
+            guard let eq = text.firstIndex(of: "=") else { continue }
+            let key = text[..<eq].trimmingCharacters(in: .whitespaces)
+            values[key] = text[text.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+        }
+        return values
+    }
+
+    /// A PrusaSlicer list of strings, joined by `;` and quoted where they need it:
+    /// `"";#FF8000` is a blank entry then `#FF8000`.
+    static func prusaStrings(_ value: String?) -> [String] {
+        guard let value, !value.isEmpty else { return [] }
+        return value.split(separator: ";", omittingEmptySubsequences: false).map {
+            $0.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\"")))
+        }
+    }
+
+    /// An extruder's colour falls back to its filament's where it is blank, as PrusaSlicer
+    /// does.
+    static func filamentColors(fromPrusaConfig values: [String: String]) -> [SIMD4<Float>] {
+        let extruders = prusaStrings(values["extruder_colour"])
+        let filaments = prusaStrings(values["filament_colour"])
+        return (0..<max(extruders.count, filaments.count)).map { index in
+            let own = index < extruders.count ? extruders[index] : ""
+            let fallback = index < filaments.count ? filaments[index] : ""
+            return FastModelParser.parseDisplayColor(own.isEmpty ? fallback : own)
+                ?? SIMD4<Float>(0.75, 0.75, 0.75, 1.0)
+        }
     }
 }
 
@@ -147,6 +200,28 @@ struct PrintSettings: Equatable {
         infillDensity = first("sparse_infill_density")
         supportsEnabled = first("enable_support") == "1"
         bedSize = Self.bedSize(fromPrintableArea: object["printable_area"] as? [String])
+    }
+
+    /// PrusaSlicer's profile, from `Slic3r_PE.config`. Its printer is named by the profile
+    /// ("Original Prusa i3 MK3S & MK3S+ 0.6 nozzle"), less the nozzle shown on its own;
+    /// `printer_model` is only an id ("MK3S"), the fallback for a profile with no name.
+    init(prusaConfig values: [String: String]) {
+        func value(_ key: String) -> String? {
+            guard let value = values[key], !value.isEmpty, value != "\"\"" else { return nil }
+            return value
+        }
+        if let profile = value("printer_settings_id") {
+            let name = profile.replacingOccurrences(of: #"\s*\S*\d\S* nozzle$"#, with: "", options: .regularExpression)
+            printer = name.isEmpty ? profile : name
+        } else {
+            printer = value("printer_model")
+        }
+        nozzleDiameter = value("nozzle_diameter")?.split(separator: ",").first.map(String.init)
+        layerHeight = value("layer_height")
+        filamentTypes = SlicerProject.prusaStrings(values["filament_type"]).filter { !$0.isEmpty }
+        infillDensity = value("fill_density")
+        supportsEnabled = value("support_material") == "1"
+        bedSize = Self.bedSize(fromPrintableArea: value("bed_shape")?.split(separator: ",").map(String.init))
     }
 
     /// `printable_area` is the bed outline as `["0x0", "256x0", "256x256", "0x256"]`.
@@ -207,6 +282,9 @@ struct PrintSettings: Equatable {
 /// A `<part>`'s id is the 3MF object id of the mesh it refers to, which is how a negative
 /// part is matched back to geometry. Parts carry their own `extruder` key, so object-level
 /// extruder is only recorded while no part is open.
+///
+/// PrusaSlicer's `Slic3r_PE_model.config` has the same `<object>` and `extruder` shape, with
+/// `<volume>` in place of `<part>` and no plates.
 final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
     var objectExtruder: [Int: Int] = [:]
     var negativeParts: Set<Int> = []
@@ -214,6 +292,7 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
 
     private var currentObjectID: Int?
     private var currentPartID: Int?
+    private var inVolume = false
     private var inPlate = false
     private var inModelInstance = false
     private var currentPlateObjects: [Int] = []
@@ -231,6 +310,8 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
         case "object":
             currentObjectID = attributes["id"].flatMap(Int.init)
             currentPartID = nil
+        case "volume":
+            inVolume = true
         case "part":
             currentPartID = attributes["id"].flatMap(Int.init)
             if attributes["subtype"] == "negative_part", let id = currentPartID {
@@ -245,7 +326,7 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
             inModelInstance = true
         case "metadata":
             guard let key = attributes["key"], let value = attributes["value"] else { return }
-            if key == "extruder", currentPartID == nil, let id = currentObjectID {
+            if key == "extruder", currentPartID == nil, !inVolume, let id = currentObjectID {
                 objectExtruder[id] = Int(value)
             }
             if key == "object_id", inPlate, inModelInstance, let id = Int(value) {
@@ -274,6 +355,8 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
             currentPartID = nil
         case "part":
             currentPartID = nil
+        case "volume":
+            inVolume = false
         case "model_instance":
             inModelInstance = false
         case "plate":

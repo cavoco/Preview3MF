@@ -970,6 +970,12 @@ final class FastModelParser {
                 guard al > 5, bytes[an + al - 5] == colon else { return false }
                 return nameIs(an + al - 4, 4, "path")
             }
+            // PrusaSlicer's `slic3rpe:mmu_segmentation`, which holds paint in the same encoding
+            // as Bambu's `paint_color`. Matched by local name, as the prefix is the writer's.
+            @inline(__always) func isPaintSegmentationAttribute(_ an: Int, _ al: Int) -> Bool {
+                guard al > 17, bytes[an + al - 17] == colon else { return false }
+                return nameIs(an + al - 16, 16, "mmu_segmentation")
+            }
             @inline(__always) func str(_ vs: Int, _ ve: Int) -> String {
                 String(decoding: UnsafeBufferPointer(rebasing: bytes[vs..<ve]), as: UTF8.self)
             }
@@ -1065,6 +1071,8 @@ final class FastModelParser {
                         } else if al == 3, nameIs(an, al, "pid") {
                             pid = d(vs)
                         } else if al == 11, nameIs(an, al, "paint_color") {
+                            paintStart = vs; paintEnd = valueEnd(vs)
+                        } else if isPaintSegmentationAttribute(an, al) {
                             paintStart = vs; paintEnd = valueEnd(vs)
                         }
                     }
@@ -1165,8 +1173,8 @@ final class FastModelParser {
                 } else if nameIs(ns, nl, "colorgroup") {
                     // Materials & Properties extension — the standard way to carry
                     // per-triangle colour, used by 3D Builder, Fusion and anything exporting
-                    // conformant 3MF. (Bambu Studio and OrcaSlicer instead paint via a
-                    // proprietary `paint_color` triangle attribute; see `paintSlot`.)
+                    // conformant 3MF. (Bambu Studio, OrcaSlicer and PrusaSlicer instead paint
+                    // via proprietary triangle attributes; see `paintSlot`.)
                     // Resource ids share a single space with <basematerials>, so triangles
                     // resolve to these through the same pid / p1..p3 lookup, no special casing.
                     forEachAttr(j, attrEnd) { an, al, vs in
@@ -1208,8 +1216,8 @@ final class FastModelParser {
         var slot: UInt8
     }
 
-    /// The filament slot a Bambu Studio / OrcaSlicer `paint_color` gives a triangle, or 0
-    /// for none.
+    /// The filament slot a Bambu Studio / OrcaSlicer `paint_color`, or a PrusaSlicer
+    /// `slic3rpe:mmu_segmentation`, gives a triangle, or 0 for none.
     ///
     /// The value is hex, one nibble per node of a tree, read from the end of the string
     /// backwards. A node's low two bits say how many of its sides are split (so it has one
