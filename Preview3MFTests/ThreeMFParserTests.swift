@@ -1217,10 +1217,10 @@ final class ThreeMFParserTests: XCTestCase {
     }
 
     func testPrusaPrinterFallsBackToTheModelID() {
-        let settings = PrintSettings(prusaConfig: ["printer_model": "MK3S", "printer_settings_id": "",
+        let settings = PrintSettings(keyValues: ["printer_model": "MK3S", "printer_settings_id": "",
                                                    "nozzle_diameter": "0.6"])
         XCTAssertEqual(settings.summary, ["MK3S", "0.6 mm nozzle"])
-        let named = PrintSettings(prusaConfig: ["printer_settings_id": "Original Prusa i3 MK3S & MK3S+ 0.6 nozzle"])
+        let named = PrintSettings(keyValues: ["printer_settings_id": "Original Prusa i3 MK3S & MK3S+ 0.6 nozzle"])
         XCTAssertEqual(named.printer, "Original Prusa i3 MK3S & MK3S+")
     }
 

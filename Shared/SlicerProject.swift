@@ -72,7 +72,7 @@ struct SlicerProject {
         } else if let data = entryData(archive, "Metadata/Slic3r_PE.config") {
             let values = prusaConfigValues(data)
             project.filamentColors = filamentColors(fromPrusaConfig: values)
-            project.printSettings = PrintSettings(prusaConfig: values)
+            project.printSettings = PrintSettings(keyValues: values)
             if !project.filamentColors.isEmpty { project.defaultExtruder = 1 }
         }
         if let data = entryData(archive, "Metadata/model_settings.config")
@@ -202,26 +202,34 @@ struct PrintSettings: Equatable {
         bedSize = Self.bedSize(fromPrintableArea: object["printable_area"] as? [String])
     }
 
-    /// PrusaSlicer's profile, from `Slic3r_PE.config`. Its printer is named by the profile
-    /// ("Original Prusa i3 MK3S & MK3S+ 0.6 nozzle"), less the nozzle shown on its own;
-    /// `printer_model` is only an id ("MK3S"), the fallback for a profile with no name.
-    init(prusaConfig values: [String: String]) {
+    /// A profile written as `key = value` lines: PrusaSlicer's `Slic3r_PE.config`, and the
+    /// settings PrusaSlicer, Bambu Studio and OrcaSlicer list at the end of their G-code.
+    /// Where the two families name a setting differently, either is read.
+    ///
+    /// Bambu's `printer_model` is a proper name ("Bambu Lab P1S"). PrusaSlicer's is only an
+    /// id ("MK3S"), so there the printer is named by its profile ("Original Prusa i3 MK3S &
+    /// MK3S+ 0.6 nozzle"), less the nozzle shown on its own.
+    init(keyValues values: [String: String]) {
         func value(_ key: String) -> String? {
             guard let value = values[key], !value.isEmpty, value != "\"\"" else { return nil }
             return value
         }
-        if let profile = value("printer_settings_id") {
+        let model = value("printer_model")
+        if let model, model.contains(" ") {
+            printer = model
+        } else if let profile = value("printer_settings_id") {
             let name = profile.replacingOccurrences(of: #"\s*\S*\d\S* nozzle$"#, with: "", options: .regularExpression)
             printer = name.isEmpty ? profile : name
         } else {
-            printer = value("printer_model")
+            printer = model
         }
         nozzleDiameter = value("nozzle_diameter")?.split(separator: ",").first.map(String.init)
         layerHeight = value("layer_height")
         filamentTypes = SlicerProject.prusaStrings(values["filament_type"]).filter { !$0.isEmpty }
-        infillDensity = value("fill_density")
-        supportsEnabled = value("support_material") == "1"
-        bedSize = Self.bedSize(fromPrintableArea: value("bed_shape")?.split(separator: ",").map(String.init))
+        infillDensity = value("fill_density") ?? value("sparse_infill_density")
+        supportsEnabled = (value("support_material") ?? value("enable_support")) == "1"
+        let bed = value("bed_shape") ?? value("printable_area")
+        bedSize = Self.bedSize(fromPrintableArea: bed?.split(separator: ",").map(String.init))
     }
 
     /// `printable_area` is the bed outline as `["0x0", "256x0", "256x256", "0x256"]`.
