@@ -23,19 +23,6 @@ final class SceneBuilder {
         showBuildPlate: Bool = true,
         bedSize: SIMD2<Float>? = nil
     ) -> SCNScene {
-        let scene = SCNScene()
-
-        let isDark = appearance == .dark
-        // Light grey rather than white in light mode: white and pale filaments are common,
-        // and on a white background they all but disappear.
-        scene.background.contents = isDark
-            ? NSColor(white: 0.15, alpha: 1.0)
-            : NSColor(white: 0.88, alpha: 1.0)
-
-        // 3MF is Z-up; SceneKit is Y-up. Rotate the whole assembly -90° about X so the
-        // build plate lies flat in the XZ plane and the print height runs up the screen.
-        let zUpToYUp = simd_float4x4(simd_quatf(angle: -.pi / 2, axis: SIMD3(1, 0, 0)))
-
         // Container holds all build items so we can center and rotate them together
         let containerNode = SCNNode()
         for item in items {
@@ -44,6 +31,28 @@ final class SceneBuilder {
             node.simdTransform = zUpToYUp * item.transform
             containerNode.addChildNode(node)
         }
+        return stage(containerNode, appearance: appearance, showBuildPlate: showBuildPlate, bedSize: bedSize)
+    }
+
+    /// 3MF and G-code are Z-up; SceneKit is Y-up. Rotating -90° about X lays the build plate
+    /// flat in the XZ plane, with the print height running up the screen.
+    static let zUpToYUp = simd_float4x4(simd_quatf(angle: -.pi / 2, axis: SIMD3(1, 0, 0)))
+
+    /// Puts a model on the turntable: centred, spinning, over the bed, framed and lit.
+    static func stage(
+        _ containerNode: SCNNode,
+        appearance: Appearance,
+        showBuildPlate: Bool,
+        bedSize: SIMD2<Float>?
+    ) -> SCNScene {
+        let scene = SCNScene()
+
+        let isDark = appearance == .dark
+        // Light grey rather than white in light mode: white and pale filaments are common,
+        // and on a white background they all but disappear.
+        scene.background.contents = isDark
+            ? NSColor(white: 0.15, alpha: 1.0)
+            : NSColor(white: 0.88, alpha: 1.0)
 
         // Compute bounding box of the whole assembly, then re-center at the origin
         let (bbMin, bbMax) = containerNode.boundingBox

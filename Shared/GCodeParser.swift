@@ -14,7 +14,7 @@ enum GCodeFeature: UInt8, CaseIterable {
         case "perimeter", "inner wall", "wall-inner": self = .innerWall
         case "overhang perimeter", "overhang wall": self = .overhangWall
         case "internal infill", "sparse infill", "fill": self = .sparseInfill
-        case "solid infill", "internal solid infill", "skin": self = .solidInfill
+        case "solid infill", "internal solid infill", "floating vertical shell", "skin": self = .solidInfill
         case "top solid infill", "top surface": self = .topSurface
         case "bottom surface": self = .bottomSurface
         case "bridge infill", "bridge", "internal bridge": self = .bridge

@@ -13,11 +13,13 @@
 		A100000004 /* ThreeMFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000010 /* ThreeMFParser.swift */; };
 		A100000091 /* SlicerProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000099 /* SlicerProject.swift */; };
 		A100000094 /* GCodeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A0 /* GCodeParser.swift */; };
+		A100000097 /* ToolpathGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A1 /* ToolpathGeometry.swift */; };
 		A100000005 /* SceneBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000011 /* SceneBuilder.swift */; };
 		A100000006 /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000020 /* PreviewViewController.swift */; };
 		A100000007 /* ThreeMFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000010 /* ThreeMFParser.swift */; };
 		A100000092 /* SlicerProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000099 /* SlicerProject.swift */; };
 		A100000095 /* GCodeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A0 /* GCodeParser.swift */; };
+		A100000098 /* ToolpathGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A1 /* ToolpathGeometry.swift */; };
 		A100000008 /* SceneBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000011 /* SceneBuilder.swift */; };
 		A100000009 /* PreviewExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A300000002 /* PreviewExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A100000010 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A500000001 /* ZIPFoundation */; };
@@ -26,10 +28,12 @@
 		A100000020 /* ThreeMFParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000030 /* ThreeMFParserTests.swift */; };
 		A100000021 /* SceneBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000031 /* SceneBuilderTests.swift */; };
 		A100000022 /* GCodeParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000032 /* GCodeParserTests.swift */; };
+		A100000023 /* ToolpathGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000033 /* ToolpathGeometryTests.swift */; };
 		A100000030 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000040 /* ThumbnailProvider.swift */; };
 		A100000031 /* ThreeMFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000010 /* ThreeMFParser.swift */; };
 		A100000093 /* SlicerProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000099 /* SlicerProject.swift */; };
 		A100000096 /* GCodeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A0 /* GCodeParser.swift */; };
+		A100000099 /* ToolpathGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000A1 /* ToolpathGeometry.swift */; };
 		A100000032 /* SceneBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000011 /* SceneBuilder.swift */; };
 		A100000033 /* ThumbnailExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A300000007 /* ThumbnailExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A100000034 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = A500000004 /* ZIPFoundation */; };
@@ -84,12 +88,14 @@
 		A200000011 /* SceneBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneBuilder.swift; sourceTree = "<group>"; };
 		A200000099 /* SlicerProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlicerProject.swift; sourceTree = "<group>"; };
 		A2000000A0 /* GCodeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GCodeParser.swift; sourceTree = "<group>"; };
+		A2000000A1 /* ToolpathGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolpathGeometry.swift; sourceTree = "<group>"; };
 		A200000020 /* PreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewViewController.swift; sourceTree = "<group>"; };
 		A200000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A200000022 /* PreviewExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PreviewExtension.entitlements; sourceTree = "<group>"; };
 		A200000030 /* ThreeMFParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreeMFParserTests.swift; sourceTree = "<group>"; };
 		A200000031 /* SceneBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneBuilderTests.swift; sourceTree = "<group>"; };
 		A200000032 /* GCodeParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GCodeParserTests.swift; sourceTree = "<group>"; };
+		A200000033 /* ToolpathGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolpathGeometryTests.swift; sourceTree = "<group>"; };
 		A200000040 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
 		A200000041 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A200000042 /* ThumbnailExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ThumbnailExtension.entitlements; sourceTree = "<group>"; };
@@ -176,6 +182,7 @@
 				A200000011 /* SceneBuilder.swift */,
 				A200000099 /* SlicerProject.swift */,
 				A2000000A0 /* GCodeParser.swift */,
+				A2000000A1 /* ToolpathGeometry.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -197,6 +204,7 @@
 				A200000030 /* ThreeMFParserTests.swift */,
 				A200000031 /* SceneBuilderTests.swift */,
 				A200000032 /* GCodeParserTests.swift */,
+				A200000033 /* ToolpathGeometryTests.swift */,
 			);
 			path = Preview3MFTests;
 			sourceTree = "<group>";
@@ -364,6 +372,7 @@
 				A100000004 /* ThreeMFParser.swift in Sources */,
 				A100000091 /* SlicerProject.swift in Sources */,
 				A100000094 /* GCodeParser.swift in Sources */,
+				A100000097 /* ToolpathGeometry.swift in Sources */,
 				A100000005 /* SceneBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -376,6 +385,7 @@
 				A100000007 /* ThreeMFParser.swift in Sources */,
 				A100000092 /* SlicerProject.swift in Sources */,
 				A100000095 /* GCodeParser.swift in Sources */,
+				A100000098 /* ToolpathGeometry.swift in Sources */,
 				A100000008 /* SceneBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -387,6 +397,7 @@
 				A100000020 /* ThreeMFParserTests.swift in Sources */,
 				A100000021 /* SceneBuilderTests.swift in Sources */,
 				A100000022 /* GCodeParserTests.swift in Sources */,
+				A100000023 /* ToolpathGeometryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -398,6 +409,7 @@
 				A100000031 /* ThreeMFParser.swift in Sources */,
 				A100000093 /* SlicerProject.swift in Sources */,
 				A100000096 /* GCodeParser.swift in Sources */,
+				A100000099 /* ToolpathGeometry.swift in Sources */,
 				A100000032 /* SceneBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -119,8 +119,10 @@ final class GCodeParserTests: XCTestCase {
             G1 X4 E0.1
             ;TYPE:Support material interface
             G1 X5 E0.1
+            ; FEATURE: Floating vertical shell
+            G1 X6 E0.1
             """)
-        XCTAssertEqual(path.features, [.outerWall, .sparseInfill, .innerWall, .other, .supportInterface])
+        XCTAssertEqual(path.features, [.outerWall, .sparseInfill, .innerWall, .other, .supportInterface, .solidInfill])
     }
 
     func testLayersFollowTheSlicersMarkers() throws {
