@@ -11,6 +11,7 @@
 				<string>com.preview3mf.3mf-file</string>
 				<string>com.shapr3d.3d-manufacturing.3mf</string>
 				<string>com.bambulab.3mf</string>
+				<string>com.preview3mf.gcode</string>
 			</array>
 			<key>QLSupportsSearchableItems</key>
 			<false/>
@@ -41,6 +42,28 @@
 				<key>public.mime-type</key>
 				<array>
 					<string>model/3mf</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>G-code</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.preview3mf.gcode</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>gcode</string>
+					<string>gco</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>text/x-gcode</string>
 				</array>
 			</dict>
 		</dict>

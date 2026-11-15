@@ -210,6 +210,14 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         plateSpinner.stopAnimation(nil)
         plateSpinner.isHidden = true
         do {
+            if GCodeParser.isGCode(url) {
+                let path = try GCodeParser.parse(fileAt: url, segmentLimit: GCodeParser.previewSegmentLimit)
+                guard path.segmentCount > 0 else { throw GCodeParser.ParseError.nothingPrinted }
+                result = nil
+                render(path)
+                handler(nil)
+                return
+            }
             let result = try ThreeMFParser.parse(fileAt: url)
             self.result = result
             pagingDirection = 1
@@ -221,16 +229,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
     }
 
-    private func render(_ result: ParseResult, animated: Bool) {
-        let appearance = currentAppearance
+    /// Colours the overlays for the current appearance, and returns the text colour.
+    private func styleOverlays(for appearance: SceneBuilder.Appearance) -> NSColor {
         let foreground = appearance == .dark
             ? NSColor(white: 0.8, alpha: 1.0)
             : NSColor(white: 0.2, alpha: 1.0)
-
-        // Text first. It costs nothing to set, and paging should feel immediate even
-        // though rebuilding the geometry behind it does not.
         infoLabel.textColor = foreground
-        infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground)
         plateLabel.textColor = foreground
         let overlayBackground = appearance == .dark
             ? NSColor(white: 0, alpha: 0.5)
@@ -239,6 +243,35 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         plateControl.layer?.backgroundColor = overlayBackground.cgColor
         viewControl.layer?.backgroundColor = overlayBackground.cgColor
         spinButton.contentTintColor = foreground
+        return foreground
+    }
+
+    /// A G-code file: one print, so no plates to page through.
+    private func render(_ path: GCodeToolpath) {
+        let appearance = currentAppearance
+        let foreground = styleOverlays(for: appearance)
+        infoLabel.attributedStringValue = NSAttributedString(string: buildInfoString(path), attributes: [
+            .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: foreground,
+        ])
+        plateControl.isHidden = true
+
+        let scene = SceneBuilder.buildScene(from: path, appearance: appearance)
+        SceneBuilder.setSpinning(isSpinning, in: scene)
+        sceneView.scene = scene
+        // Same first-frame settle as a 3MF's first render.
+        scene.isPaused = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.sceneView.scene?.isPaused = false
+        }
+    }
+
+    private func render(_ result: ParseResult, animated: Bool) {
+        let appearance = currentAppearance
+        // Text first. It costs nothing to set, and paging should feel immediate even
+        // though rebuilding the geometry behind it does not.
+        let foreground = styleOverlays(for: appearance)
+        infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground)
 
         // Only worth showing when there is somewhere to page to.
         let populated = result.plates.filter { $0.hasGeometry }.count
@@ -340,6 +373,23 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         // The print profile gets a line of its own; it is a different kind of fact. The
         // slicer's estimate leads it, since time and filament are what people look for.
         let printLine = (result.sliceEstimate?.summary ?? []) + (result.printSettings?.summary ?? [])
+        if !printLine.isEmpty {
+            line += "\n" + printLine.joined(separator: "  ·  ")
+        }
+        return line
+    }
+
+    /// "PrusaSlicer 2.4.2  ·  569 layers  ·  60 x 25 x 91 mm", then the print profile line.
+    private func buildInfoString(_ path: GCodeToolpath) -> String {
+        var stats: [String] = []
+        if let slicer = path.slicer { stats.append(slicer) }
+        stats.append("\(formatNumber(path.layers.count)) layer\(path.layers.count == 1 ? "" : "s")")
+        if let (lower, upper) = path.bounds {
+            let size = upper - lower
+            stats.append("\(formatDim(size.x)) x \(formatDim(size.y)) x \(formatDim(upper.z)) mm")
+        }
+        var line = stats.joined(separator: "  ·  ")
+        let printLine = (path.estimate?.summary ?? []) + (path.printSettings?.summary ?? [])
         if !printLine.isEmpty {
             line += "\n" + printLine.joined(separator: "  ·  ")
         }

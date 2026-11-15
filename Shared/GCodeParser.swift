@@ -40,6 +40,11 @@ struct GCodeToolpath {
     var tools: [UInt8] = []
     /// Layers in print order.
     var layers: [Layer] = []
+    /// The first segment of the print itself. Start G-code primes the nozzle with a line
+    /// or two along the edge of the bed before the slicer's first labelled feature; that
+    /// isn't part of the print, and counting it would stretch the bounds and pull the
+    /// print off centre. 0 when the slicer labels nothing.
+    var printStart = 0
 
     /// The slicer that wrote the file, as it names itself: "PrusaSlicer 2.4.2".
     var slicer: String?
@@ -56,11 +61,19 @@ struct GCodeToolpath {
 
     var segmentCount: Int { features.count }
 
-    /// The smallest box holding every extrusion, or nil when there is none.
+    /// The part of a layer that belongs to the print: all of it, except for whatever
+    /// comes before `printStart`.
+    func printedSegments(of layer: Layer) -> Range<Int> {
+        let start = min(max(layer.segments.lowerBound, printStart), layer.segments.upperBound)
+        return start..<layer.segments.upperBound
+    }
+
+    /// The smallest box holding every extrusion from `printStart` on, or nil when there is none.
     var bounds: (min: SIMD3<Float>, max: SIMD3<Float>)? {
-        guard var lower = points.first else { return nil }
+        let printed = points.dropFirst(2 * printStart)
+        guard var lower = printed.first else { return nil }
         var upper = lower
-        for point in points {
+        for point in printed {
             lower = simd_min(lower, point)
             upper = simd_max(upper, point)
         }
@@ -82,21 +95,106 @@ enum GCodeParser {
         case unreadable
         /// PrusaSlicer's binary G-code (`.bgcode`), a compressed format of its own.
         case binaryGCode
+        /// Readable, but nothing in it lays down plastic: a calibration or start-up script.
+        case nothingPrinted
+        /// More extrusions than the caller can hold. Reading stops at the limit rather than
+        /// running a Quick Look extension out of memory on a huge file.
+        case tooLarge
     }
 
-    static func parse(fileAt url: URL) throws -> GCodeToolpath {
+    /// Extrusions the preview reads before giving up: about 190 MB of toolpath at
+    /// 48 bytes a segment, before the geometry. Most prints are well under a million.
+    static let previewSegmentLimit = 4_000_000
+
+    /// A picture of the print the slicer wrote into the file's comments.
+    struct EmbeddedThumbnail: Equatable {
+        var width: Int
+        var height: Int
+        /// PNG or JPEG bytes.
+        var data: Data
+    }
+
+    /// How far into a file to look for thumbnails. Slicers write them at the top, before
+    /// any moves; a 512 px PNG runs to a few hundred kilobytes of base64.
+    static let thumbnailSearchLength = 4 << 20
+
+    /// The largest thumbnail in the file that ImageIO can read, or nil when there is none.
+    ///
+    /// PrusaSlicer, SuperSlicer, Bambu Studio, OrcaSlicer and Cura's thumbnail plugin all
+    /// write the same block, one base64 comment line after another:
+    /// ```
+    /// ; thumbnail begin 300x300 12345
+    /// ; iVBORw0KGgo...
+    /// ; thumbnail end
+    /// ```
+    /// with `thumbnail_JPG` and `thumbnail_QOI` variants for printers that want those.
+    /// QOI is skipped: ImageIO doesn't read it.
+    static func embeddedThumbnail(fileAt url: URL) -> EmbeddedThumbnail? {
+        guard let data = try? Data(contentsOf: url, options: .alwaysMapped) else { return nil }
+        return embeddedThumbnail(in: data.prefix(thumbnailSearchLength))
+    }
+
+    static func embeddedThumbnail(in data: Data) -> EmbeddedThumbnail? {
+        if data.starts(with: Array("GCDE".utf8)) { return nil }
+        var best: EmbeddedThumbnail?
+        var current: (width: Int, height: Int, format: Substring, base64: String)?
+        // Invalid UTF-8 elsewhere in the header decodes to replacement characters rather
+        // than failing, and base64 is plain ASCII, so it can't spoil a thumbnail.
+        let text = String(decoding: data, as: UTF8.self)
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            var line = rawLine.drop { $0 == " " || $0 == "\t" }
+            guard line.first == ";" else {
+                // The first command: no slicer writes a thumbnail after the moves begin.
+                if current == nil, let c = line.first, "GMTgmt".contains(c) { break }
+                continue
+            }
+            line = line.dropFirst().drop { $0 == " " }
+            let words = line.split(separator: " ")
+            guard let first = words.first else { continue }
+            if first.hasPrefix("thumbnail"), words.count >= 2 {
+                let format = first.dropFirst("thumbnail".count).drop { $0 == "_" }
+                if words[1] == "begin", words.count >= 3 {
+                    let size = words[2].split(separator: "x").compactMap { Int($0) }
+                    current = size.count == 2 ? (size[0], size[1], format, "") : nil
+                    continue
+                }
+                if words[1] == "end", let block = current {
+                    current = nil
+                    let readable = ["", "PNG", "JPG", "JPEG"].contains(block.format.uppercased())
+                    if readable, let image = Data(base64Encoded: block.base64, options: .ignoreUnknownCharacters),
+                       block.width * block.height > (best.map { $0.width * $0.height } ?? 0) {
+                        best = EmbeddedThumbnail(width: block.width, height: block.height, data: image)
+                    }
+                    continue
+                }
+            }
+            if current != nil { current?.base64 += line }
+        }
+        return best
+    }
+
+    /// File extensions read as G-code. Binary `.bgcode` isn't one yet.
+    static let fileExtensions: Set<String> = ["gcode", "gco"]
+
+    static func isGCode(_ url: URL) -> Bool {
+        fileExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    /// Throws `.tooLarge` as soon as the file has more than `segmentLimit` extrusions.
+    static func parse(fileAt url: URL, segmentLimit: Int = .max) throws -> GCodeToolpath {
         guard let data = try? Data(contentsOf: url, options: .alwaysMapped) else {
             throw ParseError.unreadable
         }
-        return try parse(data)
+        return try parse(data, segmentLimit: segmentLimit)
     }
 
-    static func parse(_ data: Data) throws -> GCodeToolpath {
+    static func parse(_ data: Data, segmentLimit: Int = .max) throws -> GCodeToolpath {
         if data.starts(with: Array("GCDE".utf8)) { throw ParseError.binaryGCode }
-        var reader = Reader()
+        var reader = Reader(segmentLimit: segmentLimit)
         data.withUnsafeBytes { raw in
             reader.read(raw.bindMemory(to: UInt8.self))
         }
+        if reader.overLimit { throw ParseError.tooLarge }
         return reader.finish()
     }
 
@@ -120,6 +218,8 @@ enum GCodeParser {
 
     private struct Reader {
         var path = GCodeToolpath()
+        let segmentLimit: Int
+        var overLimit = false
 
         // Machine state.
         var position = SIMD3<Float>(0, 0, 0)
@@ -145,7 +245,7 @@ enum GCodeParser {
             guard let base = bytes.baseAddress else { return }
             let n = bytes.count
             var start = 0
-            while start < n {
+            while start < n, !overLimit {
                 var end = n
                 if let hit = memchr(base + start, 0x0A, n - start) {
                     end = base.distance(to: hit.assumingMemoryBound(to: UInt8.self))
@@ -309,6 +409,7 @@ enum GCodeParser {
 
         mutating func add(_ from: SIMD3<Float>, _ to: SIMD3<Float>) {
             let index = path.features.count
+            guard index < segmentLimit else { overLimit = true; return }
             let newLayer = index == 0 || (usesLayerMarkers ? layerPending : abs(to.z - layerZ) > 1e-3)
             if newLayer {
                 closeLayer(at: index)
@@ -419,6 +520,13 @@ enum GCodeParser {
 
         mutating func finish() -> GCodeToolpath {
             closeLayer(at: path.features.count)
+            path.printStart = path.features.firstIndex { $0 != .other } ?? 0
+            // A priming line folded into the print's first layer gave the layer its own
+            // height; the layer is as high as the print's first extrusion in it.
+            if let layer = path.layers.firstIndex(where: { $0.segments.contains(path.printStart) }),
+               path.layers[layer].segments.lowerBound < path.printStart {
+                path.layers[layer].z = path.points[2 * path.printStart].z
+            }
 
             let slicer = path.slicer ?? ""
             let prusaFamily = ["PrusaSlicer", "SuperSlicer", "Slic3r"].contains { slicer.contains($0) }

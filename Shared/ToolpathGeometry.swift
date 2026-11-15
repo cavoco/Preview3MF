@@ -8,10 +8,11 @@ extension SceneBuilder {
     static func buildScene(
         from toolpath: GCodeToolpath,
         appearance: Appearance = .light,
-        showBuildPlate: Bool = true
+        showBuildPlate: Bool = true,
+        tubeBudget: Int = ToolpathGeometry.tubeBudget
     ) -> SCNScene {
         let containerNode = SCNNode()
-        if let geometry = ToolpathGeometry.build(toolpath) {
+        if let geometry = ToolpathGeometry.build(toolpath, budget: tubeBudget) {
             let node = SCNNode(geometry: geometry)
             node.simdTransform = zUpToYUp
             containerNode.addChildNode(node)
@@ -102,7 +103,7 @@ enum ToolpathGeometry {
         let featureCount = GCodeFeature.allCases.count
         var counts = [Int](repeating: 0, count: path.layers.count * featureCount)
         for (layerIndex, layer) in path.layers.enumerated() {
-            forEachTube(in: path, segments: layer.segments, dropping: []) { start, _, _ in
+            forEachTube(in: path, segments: path.printedSegments(of: layer), dropping: []) { start, _, _ in
                 counts[layerIndex * featureCount + Int(path.features[start].rawValue)] += 1
             }
         }
@@ -239,7 +240,7 @@ enum ToolpathGeometry {
             // No bead reaches down through the bed: not the first layer, and not a thinned-out
             // print's lowest drawn layer, which stands in for fewer layers than the stride.
             let halfHeight = (layer.z > 0 ? min(height, layer.z) : height) / 2
-            forEachTube(in: path, segments: layer.segments, dropping: plan.droppedFeatures) { first, a, b in
+            forEachTube(in: path, segments: path.printedSegments(of: layer), dropping: plan.droppedFeatures) { first, a, b in
                 defer { candidate += 1 }
                 guard candidate % plan.tubeStride == 0, tube < plan.tubeCount else { return }
                 let color: SIMD4<Float>

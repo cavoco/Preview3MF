@@ -9,6 +9,15 @@ class ThumbnailProvider: QLThumbnailProvider {
         let maximumSize = request.maximumSize
         let scale = request.scale
 
+        if GCodeParser.isGCode(url) {
+            do {
+                handler(try gcodeThumbnail(url, maximumSize: maximumSize, scale: scale), nil)
+            } catch {
+                handler(nil, error)
+            }
+            return
+        }
+
         // Fast path: most slicers (Bambu Studio, OrcaSlicer, PrusaSlicer) embed a pre-rendered
         // PNG. Hand it back without parsing geometry or invoking SceneKit.
         if let imageData = try? ThreeMFParser.extractEmbeddedThumbnail(fileAt: url),
@@ -30,38 +39,75 @@ class ThumbnailProvider: QLThumbnailProvider {
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             let scene = SceneBuilder.buildScene(from: result.items, showBuildPlate: false)
-            // An icon sits on whatever Finder draws behind it; keep the plain white card.
-            scene.background.contents = NSColor.white
-
-            // Strip any animations (rotation) — we want a static snapshot
-            scene.rootNode.enumerateChildNodes { node, _ in
-                node.removeAllActions()
-            }
-
-            let pixelSize = CGSize(
-                width: maximumSize.width * scale,
-                height: maximumSize.height * scale
-            )
-
-            let renderer = SCNRenderer(device: nil, options: nil)
-            renderer.scene = scene
-
-            let image = renderer.snapshot(atTime: 0, with: pixelSize, antialiasingMode: .multisampling4X)
-
-            let reply = QLThumbnailReply(contextSize: maximumSize, drawing: { context -> Bool in
-                let drawRect = ThumbnailProvider.bounds(of: context)
-                guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-                    return false
-                }
-                context.draw(cgImage, in: drawRect)
-                return true
-            })
-
-            handler(reply, nil)
+            handler(snapshotReply(scene, maximumSize: maximumSize, scale: scale), nil)
         } catch {
             handler(nil, error)
         }
     }
+
+    /// A still of the scene on a white card.
+    private func snapshotReply(_ scene: SCNScene, maximumSize: CGSize, scale: CGFloat) -> QLThumbnailReply {
+        // An icon sits on whatever Finder draws behind it; keep the plain white card.
+        scene.background.contents = NSColor.white
+
+        // Strip any animations (rotation) — we want a static snapshot
+        scene.rootNode.enumerateChildNodes { node, _ in
+            node.removeAllActions()
+        }
+
+        let pixelSize = CGSize(
+            width: maximumSize.width * scale,
+            height: maximumSize.height * scale
+        )
+
+        let renderer = SCNRenderer(device: nil, options: nil)
+        renderer.scene = scene
+
+        let image = renderer.snapshot(atTime: 0, with: pixelSize, antialiasingMode: .multisampling4X)
+
+        return QLThumbnailReply(contextSize: maximumSize, drawing: { context -> Bool in
+            let drawRect = ThumbnailProvider.bounds(of: context)
+            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                return false
+            }
+            context.draw(cgImage, in: drawRect)
+            return true
+        })
+    }
+
+    /// The slicer's own picture of the print when it wrote one big enough to be worth
+    /// showing, so the icon matches what the slicer shows and looks the same at every size.
+    /// Otherwise the toolpath drawn the way the preview draws it.
+    private func gcodeThumbnail(_ url: URL, maximumSize: CGSize, scale: CGFloat) throws -> QLThumbnailReply {
+        if let embedded = GCodeParser.embeddedThumbnail(fileAt: url),
+           max(embedded.width, embedded.height) >= Self.smallestUsableEmbeddedThumbnail,
+           let source = CGImageSourceCreateWithData(embedded.data as CFData, nil),
+           let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+            let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+            return QLThumbnailReply(contextSize: maximumSize, drawing: { context -> Bool in
+                context.draw(cgImage, in: ThumbnailProvider.aspectFit(
+                    imageSize: imageSize, in: ThumbnailProvider.bounds(of: context)))
+                return true
+            })
+        }
+
+        // Past the limit Finder shows the generic icon: reading the whole of a huge file
+        // would cost more memory and time than a thumbnail is allowed.
+        let path = try GCodeParser.parse(fileAt: url, segmentLimit: Self.thumbnailSegmentLimit)
+        guard path.segmentCount > 0 else { throw GCodeParser.ParseError.nothingPrinted }
+        // A smaller budget than the preview's: an icon can't show the detail, and the
+        // thumbnail extension has the tighter memory limit.
+        let scene = SceneBuilder.buildScene(from: path, showBuildPlate: false,
+                                            tubeBudget: Self.thumbnailTubeBudget)
+        return snapshotReply(scene, maximumSize: maximumSize, scale: scale)
+    }
+
+    /// PrusaSlicer's printer profiles often add a 16 px icon for the printer's own screen
+    /// alongside a proper one; that size is no use as a Finder thumbnail.
+    static let smallestUsableEmbeddedThumbnail = 64
+    static let thumbnailTubeBudget = 100_000
+    /// About 48 MB of toolpath; Finder renders many thumbnails at once.
+    static let thumbnailSegmentLimit = 1_000_000
 
     /// The whole of a thumbnail's drawing context, in the units it draws in.
     ///
