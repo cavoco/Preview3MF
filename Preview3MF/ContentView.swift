@@ -8,10 +8,16 @@ struct ContentView: View {
     @State private var scene: SCNScene?
     @State private var parseResult: ParseResult?
     @State private var errorMessage: String?
-    @State private var isSpinning = true
+    @State private var isSpinning = false
+    @AppStorage("Preview3MF.showKeyInfo") private var showKeyInfo = true
     /// The plate paging is heading for while its model files load; nil once it's shown.
     @State private var targetPlate: Int?
     @State private var isLoadingPlate = false
+    @State private var showPlateSpinner = false
+    @State private var spinnerToken = 0
+    @State private var spinnerShownAt: Date?
+    @State private var spinnerHideWorkItem: DispatchWorkItem?
+    private let minSpinnerDuration: TimeInterval = 2.0
     /// Bumped per file, so a plate load that finishes after another file opened is dropped.
     @State private var fileGeneration = 0
     /// The way paging last went (+1 or -1), so the plate that way is the one parsed ahead.
@@ -67,16 +73,25 @@ struct ContentView: View {
                     .frame(minHeight: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(alignment: .topLeading) {
-                        ViewControls(isSpinning: $isSpinning)
-                            .padding(10)
+                        ViewControls(isSpinning: $isSpinning, showKeyInfo: $showKeyInfo)
+                            .padding(12)
                     }
                     .overlay(alignment: .topTrailing) {
                         if let result = parseResult, populatedPlateCount(result) > 1 {
                             PlateSwitcher(result: result, index: targetPlate ?? result.plateIndex,
-                                          isLoading: isLoadingPlate, step: stepPlate)
-                                .padding(10)
+                                          isLoading: showPlateSpinner, step: stepPlate)
+                                .padding(12)
                         }
                     }
+                    .overlay(alignment: .bottom) {
+                        if showKeyInfo, let result = parseResult {
+                            KeyInfoBarView(result: result)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 12)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: showKeyInfo)
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
@@ -91,10 +106,6 @@ struct ContentView: View {
                     }
                 }
                 .frame(minHeight: 300)
-            }
-
-            if let result = parseResult {
-                ModelInfoView(result: result)
             }
 
             if let errorMessage = errorMessage {
@@ -127,12 +138,39 @@ struct ContentView: View {
         result.plates.filter { $0.hasGeometry }.count
     }
 
+    private func beginSpinnerWithMinDuration() {
+        spinnerToken += 1
+        spinnerHideWorkItem?.cancel()
+        spinnerHideWorkItem = nil
+        spinnerShownAt = Date()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            showPlateSpinner = true
+        }
+    }
+
+    private func scheduleSpinnerHideIfReady() {
+        guard !isLoadingPlate else { return }
+        spinnerHideWorkItem?.cancel()
+        let token = spinnerToken
+        let elapsed = spinnerShownAt.map { Date().timeIntervalSince($0) } ?? minSpinnerDuration
+        let remaining = max(0, minSpinnerDuration - elapsed)
+        let work = DispatchWorkItem {
+            guard spinnerToken == token, !isLoadingPlate else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showPlateSpinner = false
+            }
+        }
+        spinnerHideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+    }
+
     /// Page to the next plate holding geometry, wrapping at the ends.
     private func stepPlate(_ delta: Int) {
         guard let current = parseResult, let index = targetPlate ?? current.plateIndex,
               let next = Self.plate(after: index, step: delta, in: current) else { return }
         pagingDirection = delta
         targetPlate = next
+        beginSpinnerWithMinDuration()
         showTargetPlate(from: current)
     }
 
@@ -167,6 +205,7 @@ struct ContentView: View {
             scene = SceneBuilder.buildScene(from: updated.items, appearance: appearance,
                                             bedSize: updated.printSettings?.bedSize)
             prefetchNextPlate(updated)
+            scheduleSpinnerHideIfReady()
             return
         }
 
@@ -181,6 +220,7 @@ struct ContentView: View {
                     showTargetPlate(from: loaded)
                 } else {
                     targetPlate = nil
+                    scheduleSpinnerHideIfReady()
                 }
             }
         }
@@ -191,6 +231,10 @@ struct ContentView: View {
         fileGeneration += 1
         targetPlate = nil
         isLoadingPlate = false
+        spinnerToken += 1
+        spinnerHideWorkItem?.cancel()
+        spinnerHideWorkItem = nil
+        showPlateSpinner = false
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
@@ -211,75 +255,6 @@ struct ContentView: View {
     }
 }
 
-struct ModelInfoView: View {
-    let result: ParseResult
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Metadata
-            if let title = result.metadata.title {
-                LabeledContent("Title", value: title)
-            }
-            if let designer = result.metadata.designer {
-                LabeledContent("Designer", value: designer)
-            }
-            if let description = result.metadata.description {
-                LabeledContent("Description", value: description)
-            }
-            if let settings = result.printSettings?.summary, !settings.isEmpty {
-                LabeledContent("Print", value: settings.joined(separator: " · "))
-            }
-            if let estimate = result.sliceEstimate?.summary, !estimate.isEmpty {
-                LabeledContent("Estimate", value: estimate.joined(separator: " · "))
-            }
-            if let breakdown = result.sliceEstimate?.filamentBreakdown, !breakdown.isEmpty {
-                LabeledContent("Filament") {
-                    HStack(spacing: 12) {
-                        ForEach(breakdown.indices, id: \.self) { index in
-                            HStack(spacing: 4) {
-                                FilamentSwatch(color: breakdown[index].color)
-                                Text(breakdown[index].label)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            // Stats
-            HStack(spacing: 24) {
-                StatItem(label: "Objects", value: "\(result.objectCount)")
-                StatItem(label: "Triangles", value: Self.formatNumber(result.totalTriangles))
-                if let dims = result.dimensions {
-                    StatItem(label: "Size (mm)",
-                             value: "\(Self.formatDim(dims.x)) x \(Self.formatDim(dims.y)) x \(Self.formatDim(dims.z))")
-                }
-                if result.hasColors {
-                    StatItem(label: "Colors", value: "Yes")
-                }
-            }
-        }
-        .font(.caption)
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private static func formatNumber(_ n: Int) -> String {
-        if n >= 1_000_000 {
-            return String(format: "%.1fM", Double(n) / 1_000_000)
-        } else if n >= 1_000 {
-            return String(format: "%.1fK", Double(n) / 1_000)
-        }
-        return "\(n)"
-    }
-
-    private static func formatDim(_ v: Float) -> String {
-        if v >= 100 { return String(format: "%.0f", v) }
-        return String(format: "%.1f", v)
-    }
-}
-
 /// A filament's colour as a small dot. The outline keeps white filament visible on a light
 /// background; an unknown colour is drawn hollow.
 struct FilamentSwatch: View {
@@ -293,21 +268,100 @@ struct FilamentSwatch: View {
     }
 }
 
-/// Pause/resume for the auto-rotation, top-left of the scene.
-struct ViewControls: View {
-    @Binding var isSpinning: Bool
+/// Compact single-line bottom capsule in the host preview window.
+struct KeyInfoBarView: View {
+    let result: ParseResult
 
     var body: some View {
-        HStack(spacing: 6) {
+        let est = result.sliceEstimate?.localizedSummary ?? []
+        let breakdown = result.sliceEstimate?.filamentBreakdown ?? []
+        let segments = trailingSegments
+        let hasMaterials = !breakdown.isEmpty || !(result.printSettings?.filamentTypes ?? []).isEmpty
+
+        if !est.isEmpty || hasMaterials || !segments.isEmpty {
+            HStack(spacing: 6) {
+                if !est.isEmpty {
+                    Text(est.joined(separator: " · "))
+                }
+                if !breakdown.isEmpty {
+                    if !est.isEmpty { Text("·") }
+                    HStack(spacing: 6) {
+                        ForEach(Array(breakdown.prefix(3).enumerated()), id: \.offset) { _, f in
+                            HStack(spacing: 4) {
+                                FilamentSwatch(color: f.color)
+                                Text(f.label)
+                            }
+                        }
+                        if breakdown.count > 3 {
+                            Text(String(localized: "+\(breakdown.count - 3) more"))
+                        }
+                    }
+                } else if let types = result.printSettings?.filamentTypes, !types.isEmpty {
+                    let unique = types.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+                    Text((!est.isEmpty ? "· " : "") + unique.prefix(3).joined(separator: "/"))
+                }
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+                    Text("· " + seg)
+                }
+            }
+            .font(.system(size: 11.5, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 14)
+            .frame(height: 28)
+            .background(.regularMaterial, in: Capsule())
+        }
+    }
+
+    private var trailingSegments: [String] {
+        var segs: [String] = []
+        if let lh = result.printSettings?.layerHeight, !lh.isEmpty {
+            segs.append(String(localized: "\(lh)mm layer"))
+        }
+        if let infill = result.printSettings?.infillDensity, !infill.isEmpty {
+            segs.append(String(localized: "\(infill) infill"))
+        }
+        if result.printSettings?.supportsEnabled == true {
+            segs.append(String(localized: "Supports"))
+        }
+        if let dims = result.dimensions {
+            segs.append("\(Self.formatDim(dims.x))×\(Self.formatDim(dims.y))×\(Self.formatDim(dims.z)) mm")
+        }
+        return segs
+    }
+
+    private static func formatDim(_ v: Float) -> String {
+        if v >= 100 { return String(format: "%.0f", v) }
+        return String(format: "%.1f", v)
+    }
+}
+
+/// Pause/resume rotation + key-info toggle, top-left of the scene.
+struct ViewControls: View {
+    @Binding var isSpinning: Bool
+    @Binding var showKeyInfo: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
             Button { isSpinning.toggle() } label: {
                 Image(systemName: isSpinning ? "pause.fill" : "play.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
             }
             .help(isSpinning ? "Pause rotation" : "Resume rotation")
             .accessibilityLabel(isSpinning ? "Pause rotation" : "Resume rotation")
+
+            Button { showKeyInfo.toggle() } label: {
+                Image(systemName: showKeyInfo ? "info.circle.fill" : "info.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
+            }
+            .help(showKeyInfo ? "Hide key info" : "Show key info")
+            .accessibilityLabel(showKeyInfo ? "Hide key info" : "Show key info")
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .frame(minWidth: 40, minHeight: 32)
         .background(.regularMaterial, in: Capsule())
     }
 }
@@ -321,45 +375,43 @@ struct PlateSwitcher: View {
     let step: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            Button { step(-1) } label: { Image(systemName: "chevron.left") }
-                .accessibilityLabel("Previous plate")
+        HStack(spacing: 8) {
+            Button { step(-1) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
+            }
+            .accessibilityLabel("Previous plate")
             Text(label)
-                .font(.caption.weight(.medium))
+                .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
             if isLoading {
-                ProgressView().controlSize(.mini)
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 14, height: 14)
+                    .transition(.opacity.combined(with: .scale(scale: 0.7)))
             }
-            Button { step(1) } label: { Image(systemName: "chevron.right") }
-                .accessibilityLabel("Next plate")
+            Button { step(1) } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
+            }
+            .accessibilityLabel("Next plate")
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 32)
         .background(.regularMaterial, in: Capsule())
+        .animation(.easeInOut(duration: 0.25), value: isLoading)
     }
 
     private var label: String {
         guard let index else { return "" }
-        let counter = "Plate \(index + 1)/\(result.plateCount)"
+        let counter = String(localized: "Plate \(index + 1)/\(result.plateCount)")
         if let name = result.plates[index].name, !name.isEmpty {
             return "\(counter) · \(name)"
         }
         return counter
-    }
-}
-
-struct StatItem: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .fontWeight(.medium)
-            Text(label)
-                .foregroundColor(.secondary)
-        }
     }
 }
 

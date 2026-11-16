@@ -5,15 +5,30 @@ import SceneKit
 class PreviewViewController: NSViewController, QLPreviewingController {
 
     private var sceneView: ZoomableSCNView!
+    private var infoBar: NSStackView!
     private var infoLabel: NSTextField!
     private var plateControl: NSStackView!
     private var plateLabel: NSTextField!
     private var plateSpinner: NSProgressIndicator!
+    private var spinnerContainer: NSView!
+    private var spinnerWidthConstraint: NSLayoutConstraint!
+    private var spinnerToken = 0
+    private var spinnerShownAt: Date?
+    private var spinnerHideWorkItem: DispatchWorkItem?
+    private let minSpinnerDuration: TimeInterval = 2.0
     private var viewControl: NSStackView!
     private var spinButton: NSButton!
+    private var infoButton: NSButton!
+    private var prevButton: NSButton!
+    private var nextButton: NSButton!
+    private static let showInfoDefaultsKey = "Preview3MF.showKeyInfo"
+    private var showKeyInfo: Bool = (UserDefaults.standard.object(forKey: "Preview3MF.showKeyInfo") as? Bool) ?? true
+    private var hasKeyInfoContent = false
+    private var isCompactHUD = false
+    private var lastLayoutWidth: CGFloat = 0
     private var result: ParseResult?
     /// Survives paging, which swaps in a freshly built (spinning) scene.
-    private var isSpinning = true
+    private var isSpinning = false
     /// The plate paging is heading for while its model files load; nil once it's shown.
     private var targetPlate: Int?
     private var isLoadingPlate = false
@@ -36,55 +51,92 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         view.addSubview(sceneView)
 
         infoLabel = NSTextField(labelWithString: "")
-        infoLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        infoLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
         infoLabel.textColor = .secondaryLabelColor
-        infoLabel.backgroundColor = NSColor(white: 0, alpha: 0.5)
-        infoLabel.drawsBackground = true
+        infoLabel.drawsBackground = false
         infoLabel.isBezeled = false
         infoLabel.isEditable = false
-        // Wrap rather than run off the edge: the Quick Look panel opens narrow, and the
-        // print-profile line would otherwise only show once the panel is widened.
-        infoLabel.maximumNumberOfLines = 0
-        infoLabel.lineBreakMode = .byWordWrapping
+        infoLabel.maximumNumberOfLines = 1
+        infoLabel.lineBreakMode = .byTruncatingTail
         infoLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(infoLabel)
+
+        infoBar = NSStackView(views: [infoLabel])
+        styleOverlay(infoBar)
+        infoBar.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+        infoBar.layer?.cornerRadius = 14
+        infoBar.alphaValue = showKeyInfo ? 1 : 0
+        infoBar.isHidden = true
+        view.addSubview(infoBar)
 
         // Top-right, clear of the info label along the bottom edge.
         plateLabel = NSTextField(labelWithString: "")
-        plateLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        plateLabel.font = .systemFont(ofSize: 12, weight: .medium)
         plateLabel.alignment = .center
+        plateLabel.lineBreakMode = .byTruncatingTail
+        plateLabel.setContentHuggingPriority(.required, for: .horizontal)
+        plateLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         plateSpinner = NSProgressIndicator()
         plateSpinner.style = .spinning
         plateSpinner.controlSize = .small
         plateSpinner.isDisplayedWhenStopped = false
-        plateSpinner.isHidden = true
+        plateSpinner.translatesAutoresizingMaskIntoConstraints = false
 
+        spinnerContainer = NSView()
+        spinnerContainer.translatesAutoresizingMaskIntoConstraints = false
+        spinnerContainer.wantsLayer = true
+        spinnerContainer.layer?.masksToBounds = true
+        spinnerContainer.alphaValue = 0
+        spinnerContainer.addSubview(plateSpinner)
+        spinnerWidthConstraint = spinnerContainer.widthAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            spinnerWidthConstraint,
+            spinnerContainer.heightAnchor.constraint(equalToConstant: 16),
+            plateSpinner.leadingAnchor.constraint(equalTo: spinnerContainer.leadingAnchor),
+            plateSpinner.centerYAnchor.constraint(equalTo: spinnerContainer.centerYAnchor),
+            plateSpinner.widthAnchor.constraint(equalToConstant: 14),
+            plateSpinner.heightAnchor.constraint(equalToConstant: 14),
+        ])
+
+        prevButton = overlayButton("chevron.left", String(localized: "Previous plate"), #selector(previousPlate))
+        nextButton = overlayButton("chevron.right", String(localized: "Next plate"), #selector(nextPlate))
         plateControl = NSStackView(views: [
-            overlayButton("chevron.left", "Previous plate", #selector(previousPlate)),
+            prevButton,
             plateLabel,
-            plateSpinner,
-            overlayButton("chevron.right", "Next plate", #selector(nextPlate)),
+            spinnerContainer,
+            nextButton,
         ])
         styleOverlay(plateControl)
+        plateControl.setCustomSpacing(8, after: prevButton)
+        plateControl.setCustomSpacing(8, after: plateLabel)
+        plateControl.setCustomSpacing(0, after: spinnerContainer)
         plateControl.isHidden = true
         view.addSubview(plateControl)
 
         // Top-left, mirroring the plate control.
-        spinButton = overlayButton("pause.fill", "Pause rotation", #selector(toggleSpin))
-        viewControl = NSStackView(views: [spinButton])
+        spinButton = overlayButton("play.fill", String(localized: "Resume rotation"), #selector(toggleSpin))
+        infoButton = overlayButton(showKeyInfo ? "info.circle.fill" : "info.circle",
+                                   showKeyInfo ? String(localized: "Hide key info") : String(localized: "Show key info"),
+                                   #selector(toggleInfo))
+        viewControl = NSStackView(views: [spinButton, infoButton])
         styleOverlay(viewControl)
         view.addSubview(viewControl)
 
         NSLayoutConstraint.activate([
-            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
-            infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
-            infoLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -8),
-            plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
-            plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
-            viewControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
-            viewControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            infoBar.heightAnchor.constraint(equalToConstant: 28),
+            infoBar.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            infoBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            infoBar.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            infoBar.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            plateControl.heightAnchor.constraint(equalToConstant: 32),
+            plateControl.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            plateControl.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            plateControl.leadingAnchor.constraint(greaterThanOrEqualTo: viewControl.trailingAnchor, constant: 8),
+            viewControl.heightAnchor.constraint(equalToConstant: 32),
+            viewControl.widthAnchor.constraint(greaterThanOrEqualToConstant: 40),
+            viewControl.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            viewControl.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
         ])
 
         sceneView.onHorizontalArrow = { [weak self] delta in self?.stepPlate(delta) }
@@ -94,24 +146,63 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        // A wrapping label needs to know its width up front to report the right height.
-        infoLabel.preferredMaxLayoutWidth = view.bounds.width - 16
+        let width = view.bounds.width
+        guard abs(width - lastLayoutWidth) > 0.5 else { return }
+        lastLayoutWidth = width
+        applyResponsiveHUDLayout(forWidth: width)
+    }
+
+    private func applyResponsiveHUDLayout(forWidth width: CGFloat) {
+        let compact = width > 0 && width < 340
+        isCompactHUD = compact
+        if compact {
+            viewControl.edgeInsets = NSEdgeInsets(top: 0, left: 9, bottom: 0, right: 9)
+            viewControl.spacing = 6
+            plateControl.edgeInsets = NSEdgeInsets(top: 0, left: 9, bottom: 0, right: 9)
+            plateControl.setCustomSpacing(5, after: prevButton)
+            plateControl.setCustomSpacing(5, after: plateLabel)
+            infoBar.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
+        } else {
+            viewControl.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+            viewControl.spacing = 8
+            plateControl.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+            plateControl.setCustomSpacing(8, after: prevButton)
+            plateControl.setCustomSpacing(8, after: plateLabel)
+            infoBar.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+        }
+        if let result {
+            plateLabel.stringValue = plateLabelText(result, index: targetPlate ?? result.plateIndex)
+            refreshKeyInfoBarText(result, width: width)
+        }
     }
 
     private func styleOverlay(_ stack: NSStackView) {
         stack.orientation = .horizontal
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
         stack.wantsLayer = true
-        stack.layer?.cornerRadius = 6
+        stack.layer?.cornerRadius = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
     }
 
+    private func symbolImage(_ symbol: String, label: String) -> NSImage {
+        let base = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        return base?.withSymbolConfiguration(config) ?? base ?? NSImage()
+    }
+
     private func overlayButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        let button = FirstMouseButton(image: image ?? NSImage(), target: self, action: action)
+        let button = FirstMouseButton(image: symbolImage(symbol, label: label), target: self, action: action)
         button.isBordered = false
         button.bezelStyle = .inline
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 20),
+        ])
         button.setAccessibilityLabel(label)
         button.toolTip = label
         return button
@@ -122,15 +213,97 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         if let scene = sceneView.scene {
             SceneBuilder.setSpinning(isSpinning, in: scene)
         }
-        let label = isSpinning ? "Pause rotation" : "Resume rotation"
-        spinButton.image = NSImage(systemSymbolName: isSpinning ? "pause.fill" : "play.fill",
-                                   accessibilityDescription: label)
+        let label = isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation")
+        spinButton.image = symbolImage(isSpinning ? "pause.fill" : "play.fill", label: label)
         spinButton.setAccessibilityLabel(label)
         spinButton.toolTip = label
     }
 
+    @objc private func toggleInfo() {
+        showKeyInfo.toggle()
+        UserDefaults.standard.set(showKeyInfo, forKey: Self.showInfoDefaultsKey)
+        let label = showKeyInfo ? String(localized: "Hide key info") : String(localized: "Show key info")
+        infoButton.image = symbolImage(showKeyInfo ? "info.circle.fill" : "info.circle", label: label)
+        infoButton.setAccessibilityLabel(label)
+        infoButton.toolTip = label
+        updateInfoBarVisibility(animated: true)
+    }
+
+    private func updateInfoBarVisibility(animated: Bool) {
+        let shouldShow = showKeyInfo && hasKeyInfoContent
+        guard animated else {
+            infoBar.alphaValue = shouldShow ? 1 : 0
+            infoBar.isHidden = !shouldShow
+            return
+        }
+        if shouldShow {
+            infoBar.isHidden = false
+        }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            self.infoBar.animator().alphaValue = shouldShow ? 1 : 0
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            if !(self.showKeyInfo && self.hasKeyInfoContent) {
+                self.infoBar.isHidden = true
+            }
+        })
+    }
+
     @objc private func previousPlate() { stepPlate(-1) }
     @objc private func nextPlate() { stepPlate(1) }
+
+    private func beginSpinnerWithMinDuration() {
+        spinnerToken += 1
+        spinnerHideWorkItem?.cancel()
+        spinnerHideWorkItem = nil
+        spinnerShownAt = Date()
+        plateSpinner.startAnimation(nil)
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.25
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ctx.allowsImplicitAnimation = true
+            self.spinnerWidthConstraint.constant = self.isCompactHUD ? 19 : 22
+            self.spinnerContainer.alphaValue = 1
+            self.view.layoutSubtreeIfNeeded()
+        }
+    }
+
+    private func scheduleSpinnerHideIfReady() {
+        guard !isLoadingPlate else { return }
+        spinnerHideWorkItem?.cancel()
+        let token = spinnerToken
+        let elapsed = spinnerShownAt.map { Date().timeIntervalSince($0) } ?? minSpinnerDuration
+        let remaining = max(0, minSpinnerDuration - elapsed)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.spinnerToken == token, !self.isLoadingPlate else { return }
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.25
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ctx.allowsImplicitAnimation = true
+                self.spinnerWidthConstraint.constant = 0
+                self.spinnerContainer.alphaValue = 0
+                self.view.layoutSubtreeIfNeeded()
+            }, completionHandler: { [weak self] in
+                guard let self, self.spinnerToken == token, !self.isLoadingPlate else { return }
+                self.plateSpinner.stopAnimation(nil)
+            })
+        }
+        spinnerHideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+    }
+
+    private func resetSpinnerImmediately() {
+        spinnerToken += 1
+        spinnerHideWorkItem?.cancel()
+        spinnerHideWorkItem = nil
+        spinnerShownAt = nil
+        spinnerWidthConstraint.constant = 0
+        spinnerContainer.alphaValue = 0
+        plateSpinner.stopAnimation(nil)
+    }
 
     /// Page to the next plate that actually holds geometry, wrapping at the ends. Plates the
     /// slicer left empty stay in the numbering but are skipped over.
@@ -140,6 +313,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         pagingDirection = delta
         targetPlate = next
         plateLabel.stringValue = plateLabelText(result, index: next)
+        beginSpinnerWithMinDuration()
         showTargetPlate(from: result)
     }
 
@@ -173,26 +347,24 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             result = updated
             render(updated, animated: false)
             prefetchNextPlate()
+            scheduleSpinnerHideIfReady()
             return
         }
 
         isLoadingPlate = true
-        plateSpinner.isHidden = false
-        plateSpinner.startAnimation(nil)
         let generation = fileGeneration
         plateLoadQueue.async { [weak self] in
             let loaded = try? base.loadingPlate(target)
             DispatchQueue.main.async {
                 guard let self, generation == self.fileGeneration else { return }
                 self.isLoadingPlate = false
-                self.plateSpinner.stopAnimation(nil)
-                self.plateSpinner.isHidden = true
                 if let loaded {
                     self.showTargetPlate(from: loaded)
                 } else if let result = self.result {
                     // Stay on the plate already on screen.
                     self.targetPlate = nil
                     self.plateLabel.stringValue = self.plateLabelText(result)
+                    self.scheduleSpinnerHideIfReady()
                 }
             }
         }
@@ -207,8 +379,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         fileGeneration += 1
         targetPlate = nil
         isLoadingPlate = false
-        plateSpinner.stopAnimation(nil)
-        plateSpinner.isHidden = true
+        resetSpinnerImmediately()
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             self.result = result
@@ -229,21 +400,20 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         // Text first. It costs nothing to set, and paging should feel immediate even
         // though rebuilding the geometry behind it does not.
-        infoLabel.textColor = foreground
-        infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground)
         plateLabel.textColor = foreground
         let overlayBackground = appearance == .dark
-            ? NSColor(white: 0, alpha: 0.5)
-            : NSColor(white: 1, alpha: 0.6)
-        infoLabel.backgroundColor = overlayBackground
+            ? NSColor(white: 0, alpha: 0.55)
+            : NSColor(white: 1, alpha: 0.72)
+        infoBar.layer?.backgroundColor = overlayBackground.cgColor
         plateControl.layer?.backgroundColor = overlayBackground.cgColor
         viewControl.layer?.backgroundColor = overlayBackground.cgColor
         spinButton.contentTintColor = foreground
+        infoButton.contentTintColor = foreground
 
         // Only worth showing when there is somewhere to page to.
         let populated = result.plates.filter { $0.hasGeometry }.count
         plateControl.isHidden = populated < 2
-        plateLabel.stringValue = plateLabelText(result)
+        applyResponsiveHUDLayout(forWidth: view.bounds.width)
 
         let rebuild = { [weak self] in
             guard let self else { return }
@@ -273,36 +443,102 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     private func plateLabelText(_ result: ParseResult, index: Int? = nil) -> String {
         guard let index = index ?? result.plateIndex else { return "" }
-        let counter = "Plate \(index + 1)/\(result.plateCount)"
+        if isCompactHUD {
+            return "\(index + 1)/\(result.plateCount)"
+        }
+        let counter = String(localized: "Plate \(index + 1)/\(result.plateCount)")
         if let name = result.plates[index].name, !name.isEmpty {
             return "\(counter) · \(name)"
         }
         return counter
     }
 
-    /// The info text, plus a line of colour-swatched weights for a multi-filament plate.
-    private func buildInfoText(_ result: ParseResult, foreground: NSColor) -> NSAttributedString {
+    private func refreshKeyInfoBarText(_ result: ParseResult, width: CGFloat) {
+        let appearance = currentAppearance
+        let foreground = appearance == .dark
+            ? NSColor(white: 0.8, alpha: 1.0)
+            : NSColor(white: 0.2, alpha: 1.0)
+        infoLabel.textColor = foreground
+        let horizontalReserve: CGFloat = isCompactHUD ? 56 : 64
+        let maxTextWidth = width > 0 ? max(80, width - horizontalReserve) : 520
+        let keyText = buildKeyInfoText(result, foreground: foreground, maxWidth: maxTextWidth)
+        hasKeyInfoContent = keyText.length > 0
+        infoLabel.attributedStringValue = keyText
+        updateInfoBarVisibility(animated: false)
+    }
+
+    /// Compact single-line key metrics bar fitted strictly to available width (never trailing an orphan separator).
+    private func buildKeyInfoText(_ result: ParseResult, foreground: NSColor, maxWidth: CGFloat) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .font: infoLabel.font ?? NSFont.systemFont(ofSize: 11.5, weight: .medium),
             .foregroundColor: foreground,
         ]
-        let text = NSMutableAttributedString(string: buildInfoString(result), attributes: attributes)
-        let breakdown = result.sliceEstimate?.filamentBreakdown ?? []
-        for (index, filament) in breakdown.enumerated() {
-            text.append(NSAttributedString(string: index == 0 ? "\n" : "   ", attributes: attributes))
-            let swatch = NSTextAttachment()
-            swatch.image = swatchImage(filament.color, outline: foreground)
-            swatch.bounds = NSRect(x: 0, y: -1, width: 9, height: 9)
-            text.append(NSAttributedString(attachment: swatch))
-            text.append(NSAttributedString(string: " " + filament.label, attributes: attributes))
+        var segments: [NSAttributedString] = []
+
+        if let est = result.sliceEstimate?.localizedSummary, !est.isEmpty {
+            segments.append(NSAttributedString(string: est.joined(separator: " · "), attributes: attributes))
         }
-        return text
+
+        let breakdown = result.sliceEstimate?.filamentBreakdown ?? []
+        if !breakdown.isEmpty {
+            let swatchStr = NSMutableAttributedString()
+            for (index, filament) in breakdown.prefix(3).enumerated() {
+                if index > 0 {
+                    swatchStr.append(NSAttributedString(string: " ", attributes: attributes))
+                }
+                let swatch = NSTextAttachment()
+                swatch.image = swatchImage(filament.color, outline: foreground)
+                swatch.bounds = NSRect(x: 0, y: -1, width: 8, height: 8)
+                swatchStr.append(NSAttributedString(attachment: swatch))
+                swatchStr.append(NSAttributedString(string: " " + filament.label, attributes: attributes))
+            }
+            if breakdown.count > 3 {
+                swatchStr.append(NSAttributedString(string: " " + String(localized: "+\(breakdown.count - 3) more"), attributes: attributes))
+            }
+            segments.append(swatchStr)
+        } else if let types = result.printSettings?.filamentTypes, !types.isEmpty {
+            var seen = Set<String>()
+            let unique = types.filter { seen.insert($0).inserted }
+            segments.append(NSAttributedString(string: unique.prefix(3).joined(separator: "/"), attributes: attributes))
+        }
+
+        if let lh = result.printSettings?.layerHeight, !lh.isEmpty {
+            segments.append(NSAttributedString(string: String(localized: "\(lh)mm layer"), attributes: attributes))
+        }
+        if let infill = result.printSettings?.infillDensity, !infill.isEmpty {
+            segments.append(NSAttributedString(string: String(localized: "\(infill) infill"), attributes: attributes))
+        }
+        if result.printSettings?.supportsEnabled == true {
+            segments.append(NSAttributedString(string: String(localized: "Supports"), attributes: attributes))
+        }
+        if let dims = result.dimensions {
+            segments.append(NSAttributedString(
+                string: "\(formatDim(dims.x))×\(formatDim(dims.y))×\(formatDim(dims.z)) mm",
+                attributes: attributes
+            ))
+        }
+
+        guard let first = segments.first else { return NSAttributedString() }
+        let out = NSMutableAttributedString(attributedString: first)
+        let sep = NSAttributedString(string: "  ·  ", attributes: attributes)
+        for seg in segments.dropFirst() {
+            let candidate = NSMutableAttributedString(attributedString: out)
+            candidate.append(sep)
+            candidate.append(seg)
+            if ceil(candidate.size().width) <= maxWidth {
+                out.append(sep)
+                out.append(seg)
+            } else {
+                break
+            }
+        }
+        return out
     }
 
     /// A filled dot in the filament's colour, outlined so white filament still shows against
     /// a light overlay. An unknown colour is drawn hollow.
     private func swatchImage(_ color: SIMD4<Float>?, outline: NSColor) -> NSImage {
-        NSImage(size: NSSize(width: 9, height: 9), flipped: false) { rect in
+        NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
             let dot = NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5))
             if let color {
                 NSColor(srgbRed: CGFloat(color.x), green: CGFloat(color.y),
@@ -314,42 +550,6 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             dot.stroke()
             return true
         }
-    }
-
-    private func buildInfoString(_ result: ParseResult) -> String {
-        var parts: [String] = []
-
-        if let title = result.metadata.title {
-            parts.append(title)
-        }
-        if let designer = result.metadata.designer {
-            parts.append("by \(designer)")
-        }
-
-        var stats: [String] = []
-        stats.append("\(formatNumber(result.totalTriangles)) triangles")
-        stats.append("\(result.objectCount) object\(result.objectCount == 1 ? "" : "s")")
-        if let dims = result.dimensions {
-            stats.append("\(formatDim(dims.x)) x \(formatDim(dims.y)) x \(formatDim(dims.z)) mm")
-        }
-
-        var line = stats.joined(separator: "  ·  ")
-        if !parts.isEmpty {
-            line = parts.joined(separator: " ") + "  ·  " + line
-        }
-        // The print profile gets a line of its own; it is a different kind of fact. The
-        // slicer's estimate leads it, since time and filament are what people look for.
-        let printLine = (result.sliceEstimate?.summary ?? []) + (result.printSettings?.summary ?? [])
-        if !printLine.isEmpty {
-            line += "\n" + printLine.joined(separator: "  ·  ")
-        }
-        return line
-    }
-
-    private func formatNumber(_ n: Int) -> String {
-        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
-        return "\(n)"
     }
 
     private func formatDim(_ v: Float) -> String {

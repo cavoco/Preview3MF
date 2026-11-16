@@ -424,6 +424,22 @@ struct SliceEstimate: Equatable {
         let hours = minutes / 60
         return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
     }
+
+    static func localizedDuration(_ seconds: Int) -> String {
+        let minutes = (seconds + 30) / 60
+        guard minutes > 0 else { return String(localized: "<1m") }
+        let hours = minutes / 60
+        return hours > 0
+            ? String(localized: "\(hours)h \(minutes % 60)m")
+            : String(localized: "\(minutes)m")
+    }
+
+    var localizedSummary: [String] {
+        var parts: [String] = []
+        if let printSeconds { parts.append(Self.localizedDuration(printSeconds)) }
+        if let filamentGrams { parts.append(Self.formatGrams(filamentGrams)) }
+        return parts
+    }
 }
 
 /// Reads `Metadata/slice_info.config`, which the slicer fills in only for plates it has sliced.
