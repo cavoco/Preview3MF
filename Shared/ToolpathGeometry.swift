@@ -11,14 +11,27 @@ extension SceneBuilder {
         showBuildPlate: Bool = true,
         tubeBudget: Int = ToolpathGeometry.tubeBudget
     ) -> SCNScene {
+        buildToolpathScene(from: toolpath, appearance: appearance, showBuildPlate: showBuildPlate,
+                           tubeBudget: tubeBudget).scene
+    }
+
+    /// The scene, and the drawn toolpath for showing it a layer at a time.
+    static func buildToolpathScene(
+        from toolpath: GCodeToolpath,
+        appearance: Appearance = .light,
+        showBuildPlate: Bool = true,
+        tubeBudget: Int = ToolpathGeometry.tubeBudget
+    ) -> (scene: SCNScene, model: ToolpathGeometry.Model?) {
         let containerNode = SCNNode()
-        if let geometry = ToolpathGeometry.build(toolpath, budget: tubeBudget) {
-            let node = SCNNode(geometry: geometry)
+        let model = ToolpathGeometry.build(toolpath, budget: tubeBudget)
+        if let model {
+            let node = SCNNode(geometry: model.geometry)
             node.simdTransform = zUpToYUp
             containerNode.addChildNode(node)
         }
-        return stage(containerNode, appearance: appearance, showBuildPlate: showBuildPlate,
-                     bedSize: toolpath.printSettings?.bedSize)
+        let scene = stage(containerNode, appearance: appearance, showBuildPlate: showBuildPlate,
+                          bedSize: toolpath.printSettings?.bedSize)
+        return (scene, model)
     }
 }
 
@@ -77,6 +90,28 @@ enum ToolpathGeometry {
         case .primeTower: return hex(0xB3E3AB)
         }
     }
+
+    /// A drawn toolpath. Tubes go into the geometry in print order, so the print up to any
+    /// layer is the start of it, and showing less of the print is only a matter of drawing
+    /// fewer of its triangles: nothing is rebuilt.
+    struct Model {
+        let geometry: SCNGeometry
+        /// Per layer of the toolpath, how many tubes are drawn up to and including it. A
+        /// layer left out of a thinned print ends where the drawn layer below it does.
+        let layerEnds: [Int]
+
+        /// Draws the print up to and including `layer`; the last layer, or past it, is all of it.
+        func show(throughLayer layer: Int) {
+            guard let element = geometry.elements.first else { return }
+            if layer >= layerEnds.count - 1 {
+                element.primitiveRange = NSRange(location: NSNotFound, length: 0)
+            } else {
+                element.primitiveRange = NSRange(location: 0, length: layerEnds[max(layer, 0)] * trianglesPerTube)
+            }
+        }
+    }
+
+    static let trianglesPerTube = 8
 
     /// What gets drawn, worked out before any geometry is: which features, which layers,
     /// and how tall each tube is.
@@ -212,7 +247,7 @@ enum ToolpathGeometry {
         return (min(max(nozzle * 1.125, 0.1), 2), clampedHeight)
     }
 
-    static func build(_ path: GCodeToolpath, budget: Int = tubeBudget) -> SCNGeometry? {
+    static func build(_ path: GCodeToolpath, budget: Int = tubeBudget) -> Model? {
         let plan = plan(path, budget: budget)
         guard plan.tubeCount > 0 else { return nil }
 
@@ -234,9 +269,12 @@ enum ToolpathGeometry {
 
         var tube = 0
         var candidate = 0
+        var layerEnds = [Int](repeating: 0, count: path.layers.count)
         let up = SIMD3<Float>(0, 0, 1)
         let top = path.layers.count - 1
-        for (layerIndex, layer) in path.layers.enumerated() where (top - layerIndex) % plan.layerStride == 0 {
+        for (layerIndex, layer) in path.layers.enumerated() {
+            defer { layerEnds[layerIndex] = tube }
+            guard (top - layerIndex) % plan.layerStride == 0 else { continue }
             // No bead reaches down through the bed: not the first layer, and not a thinned-out
             // print's lowest drawn layer, which stands in for fewer layers than the stride.
             let halfHeight = (layer.z > 0 ? min(height, layer.z) : height) / 2
@@ -310,7 +348,7 @@ enum ToolpathGeometry {
         )
         let element = SCNGeometryElement(
             data: data(indices, count: plan.tubeCount * 24), primitiveType: .triangles,
-            primitiveCount: plan.tubeCount * 8, bytesPerIndex: 4
+            primitiveCount: plan.tubeCount * trianglesPerTube, bytesPerIndex: 4
         )
         let geometry = SCNGeometry(
             sources: [floatSource(positions, .vertex), floatSource(normals, .normal), colorSource],
@@ -323,6 +361,6 @@ enum ToolpathGeometry {
         material.shininess = 30
         material.lightingModel = .phong
         geometry.materials = [material]
-        return geometry
+        return Model(geometry: geometry, layerEnds: layerEnds)
     }
 }

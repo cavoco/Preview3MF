@@ -121,12 +121,37 @@ final class ToolpathGeometryTests: XCTestCase {
 
     func testThinnedPrintKeepsItsTopLayerAndHeight() throws {
         let path = try squares(layers: 10, infillLines: 4)
-        let geometry = try XCTUnwrap(ToolpathGeometry.build(path, budget: 15))
+        let geometry = try XCTUnwrap(ToolpathGeometry.build(path, budget: 15)?.geometry)
         let (lower, upper) = geometry.boundingBox
         // Top of the top layer is the nozzle height; the stretched beads reach the bed but
         // not through it.
         XCTAssertEqual(Float(upper.z), 2.0, accuracy: 1e-4)
         XCTAssertEqual(Float(lower.z), 0, accuracy: 1e-4)
+    }
+
+    // MARK: - Layers
+
+    func testLayerEndsCountTubesUpToEachLayer() throws {
+        let path = try squares(layers: 5, infillLines: 4)
+        let model = try XCTUnwrap(ToolpathGeometry.build(path))
+        XCTAssertEqual(model.layerEnds, [8, 16, 24, 32, 40])
+    }
+
+    func testSkippedLayersEndWhereTheLayerBelowDoes() throws {
+        // Every fourth layer from the top is drawn: 10, 6 and 2, counting from 1.
+        let path = try squares(layers: 10, infillLines: 4)
+        let model = try XCTUnwrap(ToolpathGeometry.build(path, budget: 15))
+        XCTAssertEqual(model.layerEnds, [0, 4, 4, 4, 4, 8, 8, 8, 8, 12])
+    }
+
+    func testShowingALayerDrawsThePrintUpToIt() throws {
+        let path = try squares(layers: 5, infillLines: 4)
+        let model = try XCTUnwrap(ToolpathGeometry.build(path))
+        let element = try XCTUnwrap(model.geometry.elements.first)
+        model.show(throughLayer: 1)
+        XCTAssertEqual(element.primitiveRange, NSRange(location: 0, length: 16 * 8))
+        model.show(throughLayer: 4)
+        XCTAssertEqual(element.primitiveRange.location, NSNotFound)
     }
 
     func testOneLayerOverBudgetIsThinnedWithinTheLayer() throws {
@@ -136,7 +161,7 @@ final class ToolpathGeometryTests: XCTestCase {
         XCTAssertEqual(plan.layerStride, 1)
         XCTAssertEqual(plan.tubeStride, 2)
         XCTAssertEqual(plan.tubeCount, 2)
-        let geometry = try XCTUnwrap(ToolpathGeometry.build(path, budget: 3))
+        let geometry = try XCTUnwrap(ToolpathGeometry.build(path, budget: 3)?.geometry)
         XCTAssertEqual(geometry.elements.first?.primitiveCount, 2 * 8)
     }
 
@@ -152,7 +177,7 @@ final class ToolpathGeometryTests: XCTestCase {
 
     func testEachTubeIsEightVerticesAndEightTriangles() throws {
         let path = try squares(layers: 2)
-        let geometry = try XCTUnwrap(ToolpathGeometry.build(path))
+        let geometry = try XCTUnwrap(ToolpathGeometry.build(path)?.geometry)
         XCTAssertEqual(geometry.sources(for: .vertex).first?.vectorCount, 8 * 8)
         XCTAssertEqual(geometry.sources(for: .normal).first?.vectorCount, 8 * 8)
         XCTAssertEqual(geometry.sources(for: .color).first?.vectorCount, 8 * 8)
@@ -172,7 +197,7 @@ final class ToolpathGeometryTests: XCTestCase {
         XCTAssertEqual(height, 0.3, accuracy: 1e-5)
         XCTAssertEqual(width, 0.675, accuracy: 1e-5)
 
-        let geometry = try XCTUnwrap(ToolpathGeometry.build(path))
+        let geometry = try XCTUnwrap(ToolpathGeometry.build(path)?.geometry)
         let (lower, upper) = geometry.boundingBox
         XCTAssertEqual(Float(upper.z), 0.3, accuracy: 1e-4)
         XCTAssertEqual(Float(lower.z), 0, accuracy: 1e-4)
@@ -193,7 +218,7 @@ final class ToolpathGeometryTests: XCTestCase {
 
     func testFacesPointOutwards() throws {
         let path = try parse("G90\nM83\nG1 X0 Y0 Z0.2\nG1 X10 E1\n")
-        let geometry = try XCTUnwrap(ToolpathGeometry.build(path))
+        let geometry = try XCTUnwrap(ToolpathGeometry.build(path)?.geometry)
         let positions = try XCTUnwrap(geometry.sources(for: .vertex).first).data
         let indices = try XCTUnwrap(geometry.elements.first).data
         let vertices: [SIMD3<Float>] = positions.withUnsafeBytes { raw in
@@ -213,7 +238,7 @@ final class ToolpathGeometryTests: XCTestCase {
     }
 
     func testNothingToDrawGivesNoGeometry() throws {
-        XCTAssertNil(ToolpathGeometry.build(try parse("G90\nG1 X10 Y10\n")))
+        XCTAssertNil(ToolpathGeometry.build(try parse("G90\nG1 X10 Y10\n"))?.geometry)
     }
 
     // MARK: - Colour
@@ -258,7 +283,7 @@ final class ToolpathGeometryTests: XCTestCase {
             G1 Z0.48
             G1 X0 E1
             """)
-        let geometry = try XCTUnwrap(ToolpathGeometry.build(path))
+        let geometry = try XCTUnwrap(ToolpathGeometry.build(path)?.geometry)
         XCTAssertEqual(Float(geometry.boundingBox.min.z), 0, accuracy: 1e-4)
     }
 
@@ -276,7 +301,7 @@ final class ToolpathGeometryTests: XCTestCase {
             T5
             G1 X0 E1
             """)
-        let geometry = try XCTUnwrap(ToolpathGeometry.build(path))
+        let geometry = try XCTUnwrap(ToolpathGeometry.build(path)?.geometry)
         let source = try XCTUnwrap(geometry.sources(for: .color).first)
         let colors: [SIMD4<Float>] = source.data.withUnsafeBytes { raw in
             Array(raw.bindMemory(to: SIMD4<Float>.self))

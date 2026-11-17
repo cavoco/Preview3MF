@@ -11,6 +11,14 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private var plateSpinner: NSProgressIndicator!
     private var viewControl: NSStackView!
     private var spinButton: NSButton!
+    private var layerControl: NSStackView!
+    private var layerSlider: NSSlider!
+    private var layerLabel: NSTextField!
+    /// Keeps the info label clear of the layer slider, while there is one.
+    private var infoClearOfLayers: NSLayoutConstraint!
+    /// The G-code on show, and its drawn toolpath, for the layer slider.
+    private var toolpath: GCodeToolpath?
+    private var toolpathModel: ToolpathGeometry.Model?
     private var result: ParseResult?
     /// Survives paging, which swaps in a freshly built (spinning) scene.
     private var isSpinning = true
@@ -77,7 +85,36 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         styleOverlay(viewControl)
         view.addSubview(viewControl)
 
+        // Right edge, under the top corner, as in the slicers' previews: drag down to see
+        // the print as it stood at an earlier layer.
+        layerLabel = NSTextField(labelWithString: "")
+        layerLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        layerLabel.alignment = .center
+        layerLabel.maximumNumberOfLines = 2
+
+        layerSlider = FirstMouseSlider(value: 0, minValue: 0, maxValue: 1,
+                                       target: self, action: #selector(layerSliderMoved))
+        layerSlider.isVertical = true
+        layerSlider.isContinuous = true
+        layerSlider.controlSize = .small
+        layerSlider.setAccessibilityLabel("Layer")
+
+        layerControl = NSStackView(views: [layerLabel, layerSlider])
+        styleOverlay(layerControl)
+        layerControl.orientation = .vertical
+        layerControl.alignment = .centerX
+        layerControl.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 8, right: 6)
+        layerControl.isHidden = true
+        view.addSubview(layerControl)
+
+        infoClearOfLayers = infoLabel.trailingAnchor.constraint(
+            lessThanOrEqualTo: layerControl.leadingAnchor, constant: -8)
+
         NSLayoutConstraint.activate([
+            layerControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            layerControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            layerControl.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
+            layerControl.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
             infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
             infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
             infoLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -8),
@@ -127,6 +164,33 @@ class PreviewViewController: NSViewController, QLPreviewingController {
                                    accessibilityDescription: label)
         spinButton.setAccessibilityLabel(label)
         spinButton.toolTip = label
+    }
+
+    @objc private func layerSliderMoved() {
+        showLayer(Int(layerSlider.doubleValue.rounded()))
+    }
+
+    private func showLayer(_ index: Int) {
+        guard let toolpath, !toolpath.layers.isEmpty else { return }
+        let index = min(max(index, 0), toolpath.layers.count - 1)
+        toolpathModel?.show(throughLayer: index)
+        layerLabel.stringValue = "\(index + 1)/\(toolpath.layers.count)\n"
+            + String(format: "%.2f mm", toolpath.layers[index].z)
+    }
+
+    /// Shows or hides the layer slider: only a G-code file with more than one layer has one.
+    private func setLayerControl(for toolpath: GCodeToolpath?, model: ToolpathGeometry.Model?) {
+        self.toolpath = toolpath
+        toolpathModel = model
+        let layers = toolpath?.layers.count ?? 0
+        let shown = model != nil && layers > 1
+        layerControl.isHidden = !shown
+        infoClearOfLayers.isActive = shown
+        guard shown else { return }
+        layerSlider.minValue = 0
+        layerSlider.maxValue = Double(layers - 1)
+        layerSlider.doubleValue = Double(layers - 1)
+        showLayer(layers - 1)
     }
 
     @objc private func previousPlate() { stepPlate(-1) }
@@ -242,6 +306,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         infoLabel.backgroundColor = overlayBackground
         plateControl.layer?.backgroundColor = overlayBackground.cgColor
         viewControl.layer?.backgroundColor = overlayBackground.cgColor
+        layerControl.layer?.backgroundColor = overlayBackground.cgColor
+        layerLabel.textColor = foreground
         spinButton.contentTintColor = foreground
         return foreground
     }
@@ -256,7 +322,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         ])
         plateControl.isHidden = true
 
-        let scene = SceneBuilder.buildScene(from: path, appearance: appearance)
+        let (scene, model) = SceneBuilder.buildToolpathScene(from: path, appearance: appearance)
+        setLayerControl(for: path, model: model)
         SceneBuilder.setSpinning(isSpinning, in: scene)
         sceneView.scene = scene
         // Same first-frame settle as a 3MF's first render.
@@ -272,6 +339,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         // though rebuilding the geometry behind it does not.
         let foreground = styleOverlays(for: appearance)
         infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground)
+
+        setLayerControl(for: nil, model: nil)
 
         // Only worth showing when there is somewhere to page to.
         let populated = result.plates.filter { $0.hasGeometry }.count
@@ -416,6 +485,11 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 /// being spent activating it instead. Pressing again then read as a double-click, which
 /// Quick Look handles by opening the file.
 final class FirstMouseButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// The same for the layer slider, so the first drag in an inactive panel moves it.
+final class FirstMouseSlider: NSSlider {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
