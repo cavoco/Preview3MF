@@ -144,7 +144,7 @@ the slicer embeds at the top of the file, and draw the toolpath when there isn't
 
 Full history and downloads are on the [Releases page](https://github.com/cavoco/Preview3MF/releases). Recent highlights:
 
-- **v1.0.29** — G-code previews and Finder thumbnails, with a layer slider
+- **v1.1.0** — G-code previews and Finder thumbnails, with a layer slider
 - **v1.0.27** — painted colours from Bambu Studio / OrcaSlicer; grey backdrop in light mode; Finder thumbnails fill the whole card
 - **v1.0.26** — large projects load faster (only the shown plate is parsed); ZIP64 packages open; filament colours no longer washed out
 - **v1.0.25** — estimated print time and filament weight per sliced plate, with a per-filament breakdown
