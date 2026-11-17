@@ -6,6 +6,15 @@
         <description>Updates for Preview3MF, a Quick Look extension for .3mf files.</description>
         <language>en</language>
         <item>
+            <title>1.1.0</title>
+            <pubDate>Tue, 17 Nov 2026 19:19:13 +0000</pubDate>
+            <sparkle:version>30</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul><li>Say when a G-code preview is simplified, and scroll the layer slider</li><li>Read Cura&#x27;s header the way its own preview shows it</li><li>Scrub through a G-code print layer by layer</li><li>Preview and thumbnail G-code files in Finder</li><li>Draw G-code toolpaths as printed beads</li><li>Read the toolpath and print details from G-code</li></ul>]]></description>
+            <enclosure url="https://github.com/cavoco/Preview3MF/releases/download/v1.1.0/Preview3MF-v1.1.0-universal.zip" sparkle:edSignature="2wh/PT/9n6Es1W0mg6TRaC30jUE3VpH7qLkn1D8soANOFcw5zCmmASKBi1oXrfAJnl4PK4MPbxghmzqa22hVAg==" length="5276577" type="application/octet-stream"/>
+        </item>
+        <item>
             <title>1.0.28</title>
             <pubDate>Wed, 11 Nov 2026 12:20:34 +0000</pubDate>
             <sparkle:version>29</sparkle:version>
