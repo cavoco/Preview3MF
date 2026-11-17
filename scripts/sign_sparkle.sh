@@ -42,12 +42,13 @@ VERSIONS="$FRAMEWORK/Versions/B"
 # before giving up, as the release workflow does for the build.
 sign() {
     local attempt
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4 5; do
         if codesign --force --sign "$IDENTITY" --timestamp --options runtime "$@"; then
             return 0
         fi
-        echo "codesign failed (attempt $attempt of 3); retrying" >&2
-        sleep $((attempt * 10))
+        [ "$attempt" -lt 5 ] || break
+        echo "codesign failed (attempt $attempt of 5); retrying" >&2
+        sleep $((attempt * 20))
     done
     return 1
 }

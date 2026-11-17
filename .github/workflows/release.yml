@@ -61,13 +61,14 @@ jobs:
       - name: Build universal, signed Release
         run: |
           # Signing asks Apple's timestamp server for a secure timestamp on every
-          # bundle, and from GitHub's runners that request now and then goes
-          # unanswered ("A timestamp was expected but was not found"), failing the
-          # whole build. Only that failure is retried; the rebuild is incremental,
-          # so it just signs again. Anything else fails at once.
+          # bundle, and from GitHub's runners that request can go unanswered for
+          # minutes at a time ("A timestamp was expected but was not found"),
+          # failing the whole build. Only that failure is retried, backing off for
+          # about seven minutes in all; the rebuild is incremental, so it just
+          # signs again. Anything else fails at once.
           # The default shell lacks pipefail, so xcodebuild's status would be lost to tee.
           set -o pipefail
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5 6; do
             if xcodebuild \
                 -scheme Preview3MF \
                 -configuration Release \
@@ -85,10 +86,11 @@ jobs:
             if ! grep -q "A timestamp was expected but was not found" "$RUNNER_TEMP/build.log"; then
               exit 1
             fi
-            echo "::warning::Apple's timestamp server didn't answer (attempt $attempt of 3); retrying"
-            sleep $((attempt * 20))
+            [ "$attempt" -lt 6 ] || break
+            echo "::warning::Apple's timestamp server didn't answer (attempt $attempt of 6); retrying"
+            sleep $((attempt * 30))
           done
-          echo "::error::Signing timestamps still failing after 3 attempts"
+          echo "::error::Signing timestamps still failing after 6 attempts"
           exit 1
 
       - name: Locate the built app
