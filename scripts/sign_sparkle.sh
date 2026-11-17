@@ -38,8 +38,18 @@ fi
 
 VERSIONS="$FRAMEWORK/Versions/B"
 
+# Apple's timestamp server occasionally doesn't answer; retry a couple of times
+# before giving up, as the release workflow does for the build.
 sign() {
-    codesign --force --sign "$IDENTITY" --timestamp --options runtime "$@"
+    local attempt
+    for attempt in 1 2 3; do
+        if codesign --force --sign "$IDENTITY" --timestamp --options runtime "$@"; then
+            return 0
+        fi
+        echo "codesign failed (attempt $attempt of 3); retrying" >&2
+        sleep $((attempt * 10))
+    done
+    return 1
 }
 
 sign "$VERSIONS/XPCServices/Downloader.xpc"
