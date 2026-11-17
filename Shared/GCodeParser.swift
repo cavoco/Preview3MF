@@ -488,11 +488,30 @@ enum GCodeParser {
                     path.slicer = rest.components(separatedBy: " on ").first ?? rest
                     return
                 }
-                if hasPrefix("Generated with ") { path.slicer = text(from: 15); return }
+                if hasPrefix("Generated with ") {
+                    // Cura names itself by its engine: "Cura_SteamEngine 5.4.0".
+                    path.slicer = text(from: 15).replacingOccurrences(of: "Cura_SteamEngine", with: "Cura")
+                    return
+                }
                 if hasPrefix("BambuStudio ") { path.slicer = text(from: 0); return }
             }
             if hasPrefix("TIME:") {                                // Cura, in seconds
                 printSeconds = printSeconds ?? Int(text(from: 5))
+                return
+            }
+            // Cura's header: `;Layer height: 0.2` for most printers, and for UltiMaker's own
+            // a block of `;PRINT.TIME:6666` and `;EXTRUDER_TRAIN.0.NOZZLE.DIAMETER:0.4`.
+            // Kept under the names PrusaSlicer uses, so the profile reads them like its own.
+            if hasPrefix("Layer height:") {
+                settings["layer_height"] = text(from: 13).trimmingCharacters(in: .whitespaces)
+                return
+            }
+            if hasPrefix("PRINT.TIME:") {
+                printSeconds = printSeconds ?? Int(text(from: 11))
+                return
+            }
+            if hasPrefix("EXTRUDER_TRAIN.0.NOZZLE.DIAMETER:") {
+                settings["nozzle_diameter"] = text(from: 33)
                 return
             }
             if hasPrefix("model printing time:") {                 // Bambu header

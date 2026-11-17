@@ -265,9 +265,77 @@ final class GCodeParserTests: XCTestCase {
             ;TYPE:WALL-OUTER
             G1 X10 E1
             """)
-        XCTAssertEqual(path.slicer, "Cura_SteamEngine 5.4.0")
+        XCTAssertEqual(path.slicer, "Cura 5.4.0")
         XCTAssertEqual(path.estimate?.printSeconds, 6023)
         XCTAssertNil(path.printSettings)
+    }
+
+    /// The shape of Cura's output for a Marlin printer: start G-code's purge line before
+    /// the first layer and before any label, absolute extrusion reset at every layer,
+    /// retractions, and travel as `G0`.
+    func testCuraPrint() throws {
+        let path = try parse("""
+            ;FLAVOR:Marlin
+            ;TIME:3723
+            ;Filament used: 1.2345m
+            ;Layer height: 0.2
+            ;MINX:100\r
+            ;Generated with Cura_SteamEngine 5.7.1
+            M82 ;absolute extrusion mode
+            G28
+            G92 E0
+            G1 Z2.0 F3000
+            G1 X0.1 Y20 Z0.3 F5000.0
+            G1 X0.1 Y200.0 Z0.3 F1500.0 E15
+            G92 E0
+            G1 Z2.0 F3000
+            G92 E0
+            G1 F2700 E-5
+            ;LAYER_COUNT:2
+            ;LAYER:0
+            M107
+            G0 F6000 X100 Y100 Z0.2
+            ;TYPE:SKIRT
+            G1 F2700 E0
+            G1 F1200 X110 Y100 E0.5
+            G1 X110 Y110 E1.0
+            ;MESH:cube.stl
+            ;TYPE:WALL-OUTER
+            G1 X100 Y110 E1.5
+            ;TIME_ELAPSED:12.3
+            ;LAYER:1
+            G92 E0
+            G0 X100 Y100 Z0.4
+            ;TYPE:FILL
+            G1 X110 Y110 E0.7
+            ;TIME_ELAPSED:24.6
+            G1 F2700 E-5
+            M140 S0
+            """)
+        XCTAssertEqual(path.slicer, "Cura 5.7.1")
+        XCTAssertEqual(path.estimate?.printSeconds, 3723)
+        XCTAssertEqual(path.printSettings?.layerHeight, "0.2")
+        XCTAssertEqual(path.features, [.other, .skirt, .skirt, .outerWall, .sparseInfill])
+        XCTAssertEqual(path.printStart, 1)
+        XCTAssertEqual(path.layers.map(\.z), [0.2, 0.4])
+        XCTAssertEqual(path.layers.map(\.segments), [0..<4, 4..<5])
+        let bounds = try XCTUnwrap(path.bounds)
+        XCTAssertEqual(bounds.min, SIMD3(100, 100, 0.2))
+        XCTAssertEqual(bounds.max, SIMD3(110, 110, 0.4))
+    }
+
+    func testUltiMakerHeader() throws {
+        let path = try parse("""
+            ;START_OF_HEADER
+            ;FLAVOR:Griffin
+            ;GENERATOR.NAME:Cura_SteamEngine
+            ;PRINT.TIME:5000
+            ;EXTRUDER_TRAIN.0.NOZZLE.DIAMETER:0.4
+            ;END_OF_HEADER
+            ;Generated with Cura_SteamEngine 5.7.1
+            """)
+        XCTAssertEqual(path.estimate?.printSeconds, 5000)
+        XCTAssertEqual(path.printSettings?.nozzleDiameter, "0.4")
     }
 
     func testBinaryGCodeIsRefused() {
