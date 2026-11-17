@@ -3,7 +3,7 @@
 [![Download](https://img.shields.io/github/v/release/cavoco/Preview3MF?label=Download&sort=semver)](https://github.com/cavoco/Preview3MF/releases/latest)
 [![Website](https://img.shields.io/badge/Website-cavoco.github.io%2FPreview3MF-blue)](https://cavoco.github.io/Preview3MF/)
 
-A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press Space on any `.3mf` file in Finder to see a 3D preview of the model — no slicer needed.
+A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format) and sliced **G-code**. Press Space on any `.3mf` or `.gcode` file in Finder to see a 3D preview of the model or the print — no slicer needed.
 
 <p align="center">
   <img src="docs/preview.png" alt="Preview3MF showing a 3D model on a build-plate grid in Quick Look" width="700">
@@ -30,7 +30,13 @@ A macOS Quick Look extension for **.3mf files** (3D Manufacturing Format). Press
   following the brush even where paint covers only part of a triangle
 - **Light and dark mode** — preview and host app follow the system appearance; light mode uses
   a grey backdrop so pale models stay visible
-- **Finder thumbnails** — rendered icons for `.3mf` files, reusing the slicer's embedded preview when available
+- **Finder thumbnails** — rendered icons for `.3mf` and `.gcode` files, reusing the slicer's embedded preview when available
+- **G-code previews** — press Space on a `.gcode` file from PrusaSlicer, Bambu Studio, OrcaSlicer or Cura
+  to see the toolpath drawn as printed lines, coloured by feature (walls, infill, supports) the way the
+  slicer shows it, or by filament for a multi-colour print. A slider down the right edge scrubs through
+  the print layer by layer (drag it, or scroll over it), and the info line shows the slicer, layer
+  count, size, estimated time and filament, and the print profile. Very large prints are thinned to
+  stay quick, and say so. Binary `.bgcode` isn't supported yet
 - **Multi-object support** — handles files with multiple mesh objects (Bambu Studio, PrusaSlicer, etc.)
 - **Slicer project files** — reads Bambu Studio / OrcaSlicer projects properly: filament
   colours per object, one build plate at a time rather than every plate at once, and boolean
@@ -110,6 +116,12 @@ For Finder **thumbnails**, slicers usually bake a rendered PNG into the package 
 extension reuses that embedded image as a fast path and only falls back to SceneKit rendering when
 none is present.
 
+**G-code** is read line by line: only moves that extrude are kept (arcs are flattened), grouped into
+layers by the slicer's layer-change comments, with each line's feature taken from its `;TYPE:` label.
+Each extrusion is drawn as a short tube one line wide and one layer tall, all in a single geometry,
+so scrubbing the layer slider just draws fewer of its triangles. G-code thumbnails use the picture
+the slicer embeds at the top of the file, and draw the toolpath when there isn't one.
+
 ## Project Structure
 
 ```
@@ -123,6 +135,8 @@ none is present.
 │   └── ThumbnailProvider.swift
 └── Shared/                  # Used by all targets
     ├── ThreeMFParser.swift  # ZIP extraction, XML parsing, metadata, embedded thumbnails
+    ├── GCodeParser.swift    # G-code → toolpath, layers, print details, embedded thumbnails
+    ├── ToolpathGeometry.swift # Toolpath → printed-line geometry
     └── SceneBuilder.swift   # Mesh → SCNScene with lighting and build-plate grid
 ```
 
@@ -130,6 +144,7 @@ none is present.
 
 Full history and downloads are on the [Releases page](https://github.com/cavoco/Preview3MF/releases). Recent highlights:
 
+- **v1.0.29** — G-code previews and Finder thumbnails, with a layer slider
 - **v1.0.27** — painted colours from Bambu Studio / OrcaSlicer; grey backdrop in light mode; Finder thumbnails fill the whole card
 - **v1.0.26** — large projects load faster (only the shown plate is parsed); ZIP64 packages open; filament colours no longer washed out
 - **v1.0.25** — estimated print time and filament weight per sliced plate, with a per-filament breakdown

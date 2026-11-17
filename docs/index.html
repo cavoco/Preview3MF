@@ -69,6 +69,11 @@
       },
       {
         "@type": "Question",
+        "name": "Can I preview G-code on a Mac?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. Select a .gcode file from PrusaSlicer, Bambu Studio, OrcaSlicer or Cura in Finder and press Space: Preview3MF draws the toolpath as printed lines, coloured by feature, with a slider to step through the print layer by layer, plus the estimated print time, filament and print profile. Finder shows a thumbnail for G-code files too, using the slicer's embedded preview when there is one. Binary .bgcode files aren't supported yet." }
+      },
+      {
+        "@type": "Question",
         "name": "What is a .3mf file?",
         "acceptedAnswer": { "@type": "Answer", "text": "3MF (3D Manufacturing Format) is a modern file format for 3D printing — a ZIP archive of XML that stores the mesh along with colors, materials, and print metadata. It's the default project format for slicers like Bambu Studio and PrusaSlicer, and unlike .stl it can carry multiple objects, colors, and units in a single file." }
       },
@@ -246,7 +251,8 @@
         <div class="feature"><div class="ico">🖱️</div><h3>Interactive controls</h3><p>Orbit and zoom with your mouse or trackpad in the preview.</p></div>
         <div class="feature"><div class="ico">🎨</div><h3>Your filament colors</h3><p>Reads the palette out of Bambu Studio and OrcaSlicer projects, so a multi-color model looks like the print — not a gray blob. Standard 3MF color groups too.</p></div>
         <div class="feature"><div class="ico">📐</div><h3>Model info overlay</h3><p>Dimensions, triangle and object counts, and for sliced Bambu Studio and OrcaSlicer projects, estimated print time and filament weight per plate.</p></div>
-        <div class="feature"><div class="ico">🖼️</div><h3>Finder thumbnails</h3><p>Rendered icons for <code>.3mf</code> files, reusing the slicer's embedded preview when available.</p></div>
+        <div class="feature"><div class="ico">🖼️</div><h3>Finder thumbnails</h3><p>Rendered icons for <code>.3mf</code> and <code>.gcode</code> files, reusing the slicer's embedded preview when available.</p></div>
+        <div class="feature"><div class="ico">🧵</div><h3>G-code previews</h3><p>Press Space on a <code>.gcode</code> file to see every printed line, coloured by feature like your slicer shows it, and scrub through it layer by layer.</p></div>
         <div class="feature"><div class="ico">🧩</div><h3>Multi-object &amp; assemblies</h3><p>Handles Bambu Studio, PrusaSlicer, and component assemblies.</p></div>
         <div class="feature"><div class="ico">🗂️</div><h3>Plate by plate</h3><p>A three-plate project shows one plate at a time, named as you named it — not every plate scattered across the bed at once.</p></div>
         <div class="feature"><div class="ico">🌗</div><h3>Dark mode</h3><p>Preview and app adapt to your system appearance.</p></div>
@@ -316,6 +322,12 @@
           <summary>Do I need Bambu Studio or PrusaSlicer to open a .3mf file?</summary>
           <div class="answer">
             <p>No. Preview3MF reads <code>.3mf</code> files directly, so you can open and inspect a model without launching Bambu Studio, PrusaSlicer, or Orca. It handles files exported by all of them, including multi-object plates and component assemblies.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Can I preview G-code on a Mac?</summary>
+          <div class="answer">
+            <p>Yes. Select a <code>.gcode</code> file from PrusaSlicer, Bambu Studio, OrcaSlicer or Cura in Finder and press Space: Preview3MF draws the toolpath as printed lines, coloured by feature, with a slider to step through the print layer by layer, plus the estimated print time, filament and print profile. Finder shows a thumbnail for G-code files too, using the slicer's embedded preview when there is one. Binary <code>.bgcode</code> files aren't supported yet.</p>
           </div>
         </details>
         <details>
