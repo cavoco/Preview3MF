@@ -165,6 +165,14 @@ final class ToolpathGeometryTests: XCTestCase {
         XCTAssertEqual(geometry.elements.first?.primitiveCount, 2 * 8)
     }
 
+    func testOmissionsSayWhatWasLeftOut() throws {
+        let path = try squares(layers: 10, infillLines: 4)
+        XCTAssertEqual(ToolpathGeometry.plan(path).omissions, [])
+        XCTAssertEqual(ToolpathGeometry.plan(path, budget: 45).omissions, ["no infill"])
+        XCTAssertEqual(ToolpathGeometry.plan(path, budget: 15).omissions,
+                       ["no infill", "no inner walls", "1 in 4 layers"])
+    }
+
     func testStrideStopsAtTheLayerCount() throws {
         let path = try squares(layers: 3)
         let plan = ToolpathGeometry.plan(path, budget: 2)

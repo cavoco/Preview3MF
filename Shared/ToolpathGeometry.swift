@@ -99,6 +99,8 @@ enum ToolpathGeometry {
         /// Per layer of the toolpath, how many tubes are drawn up to and including it. A
         /// layer left out of a thinned print ends where the drawn layer below it does.
         let layerEnds: [Int]
+        /// What was left out to fit the budget.
+        let plan: Plan
 
         /// Draws the print up to and including `layer`; the last layer, or past it, is all of it.
         func show(throughLayer layer: Int) {
@@ -127,6 +129,17 @@ enum ToolpathGeometry {
         /// is over budget, which no amount of layer skipping can bring under it.
         var tubeStride = 1
         var tubeCount = 0
+
+        /// What a viewer is missing, for a print thinned to fit: "no infill", "1 in 3
+        /// layers". Empty when the whole print is drawn.
+        var omissions: [String] {
+            var parts: [String] = []
+            if droppedFeatures.contains(.sparseInfill) { parts.append("no infill") }
+            if droppedFeatures.contains(.innerWall) { parts.append("no inner walls") }
+            if layerStride > 1 { parts.append("1 in \(layerStride) layers") }
+            if tubeStride > 1 { parts.append("1 in \(tubeStride) lines") }
+            return parts
+        }
     }
 
     /// Features that can be left out with the least visible loss, in order.
@@ -361,6 +374,6 @@ enum ToolpathGeometry {
         material.shininess = 30
         material.lightingModel = .phong
         geometry.materials = [material]
-        return Model(geometry: geometry, layerEnds: layerEnds)
+        return Model(geometry: geometry, layerEnds: layerEnds, plan: plan)
     }
 }

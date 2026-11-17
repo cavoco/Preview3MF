@@ -316,13 +316,15 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private func render(_ path: GCodeToolpath) {
         let appearance = currentAppearance
         let foreground = styleOverlays(for: appearance)
-        infoLabel.attributedStringValue = NSAttributedString(string: buildInfoString(path), attributes: [
-            .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: foreground,
-        ])
         plateControl.isHidden = true
 
         let (scene, model) = SceneBuilder.buildToolpathScene(from: path, appearance: appearance)
+        infoLabel.attributedStringValue = NSAttributedString(
+            string: buildInfoString(path, omissions: model?.plan.omissions ?? []),
+            attributes: [
+                .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: foreground,
+            ])
         setLayerControl(for: path, model: model)
         SceneBuilder.setSpinning(isSpinning, in: scene)
         sceneView.scene = scene
@@ -449,13 +451,17 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     }
 
     /// "PrusaSlicer 2.4.2  ·  569 layers  ·  60 x 25 x 91 mm", then the print profile line.
-    private func buildInfoString(_ path: GCodeToolpath) -> String {
+    /// A print too big to draw whole says what it's drawn without: "simplified: no infill".
+    private func buildInfoString(_ path: GCodeToolpath, omissions: [String]) -> String {
         var stats: [String] = []
         if let slicer = path.slicer { stats.append(slicer) }
         stats.append("\(formatNumber(path.layers.count)) layer\(path.layers.count == 1 ? "" : "s")")
         if let (lower, upper) = path.bounds {
             let size = upper - lower
             stats.append("\(formatDim(size.x)) x \(formatDim(size.y)) x \(formatDim(upper.z)) mm")
+        }
+        if !omissions.isEmpty {
+            stats.append("simplified: " + omissions.joined(separator: ", "))
         }
         var line = stats.joined(separator: "  ·  ")
         let printLine = (path.estimate?.summary ?? []) + (path.printSettings?.summary ?? [])
@@ -489,8 +495,26 @@ final class FirstMouseButton: NSButton {
 }
 
 /// The same for the layer slider, so the first drag in an inactive panel moves it.
+/// Scrolling over it steps a layer at a time, for finer control than dragging over a
+/// print of hundreds of layers.
 final class FirstMouseSlider: NSSlider {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// Scroll not yet amounting to a whole step.
+    private var pendingSteps: CGFloat = 0
+
+    override func scrollWheel(with event: NSEvent) {
+        // A mouse wheel moves in lines, a trackpad in points; a few points a layer keeps
+        // a swipe from flying past the one wanted.
+        pendingSteps += event.hasPreciseScrollingDeltas ? event.scrollingDeltaY / 4 : event.scrollingDeltaY
+        let steps = pendingSteps.rounded(.towardZero)
+        guard steps != 0 else { return }
+        pendingSteps -= steps
+        let value = min(max(doubleValue + Double(steps), minValue), maxValue)
+        guard value != doubleValue else { return }
+        doubleValue = value
+        sendAction(action, to: target)
+    }
 }
 
 /// An `SCNView` that adds scroll-wheel zoom on top of SceneKit's built-in camera control.
