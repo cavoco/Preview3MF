@@ -109,7 +109,9 @@ class ThumbnailProvider: QLThumbnailProvider {
     static let thumbnailTubeBudget = 100_000
     /// About 48 MB of toolpath; Finder renders many thumbnails at once.
     static let thumbnailSegmentLimit = 1_000_000
-    static let maxCoverCropFraction: CGFloat = 0.15
+    /// Allow aspect-fill up to ~3:2 covers (33% total / ~17% per side, including standard 4:3
+    /// MakerWorld thumbnails), while falling back to aspect-fit for 16:9+ covers (44%).
+    static let maxCoverCropFraction: CGFloat = 0.34
 
     /// The whole of a thumbnail's drawing context, in the units it draws in.
     ///
