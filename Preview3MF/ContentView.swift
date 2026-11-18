@@ -68,13 +68,13 @@ struct ContentView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(alignment: .topLeading) {
                         ViewControls(isSpinning: $isSpinning)
-                            .padding(10)
+                            .padding(12)
                     }
                     .overlay(alignment: .topTrailing) {
                         if let result = parseResult, populatedPlateCount(result) > 1 {
                             PlateSwitcher(result: result, index: targetPlate ?? result.plateIndex,
                                           step: stepPlate)
-                                .padding(10)
+                                .padding(12)
                         }
                     }
                     .overlay {
@@ -309,13 +309,15 @@ struct ViewControls: View {
         HStack(spacing: 6) {
             Button { isSpinning.toggle() } label: {
                 Image(systemName: isSpinning ? "pause.fill" : "play.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
             }
             .help(isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation"))
             .accessibilityLabel(isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation"))
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .frame(height: 32)
         .background(.regularMaterial, in: Capsule())
     }
 }
@@ -328,18 +330,26 @@ struct PlateSwitcher: View {
     let step: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            Button { step(-1) } label: { Image(systemName: "chevron.left") }
-                .accessibilityLabel(String(localized: "Previous plate"))
+        HStack(spacing: 8) {
+            Button { step(-1) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
+            }
+            .accessibilityLabel(String(localized: "Previous plate"))
             Text(verbatim: label)
                 .font(.caption.weight(.medium))
                 .monospacedDigit()
-            Button { step(1) } label: { Image(systemName: "chevron.right") }
-                .accessibilityLabel(String(localized: "Next plate"))
+            Button { step(1) } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
+            }
+            .accessibilityLabel(String(localized: "Next plate"))
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .frame(height: 32)
         .background(.regularMaterial, in: Capsule())
     }
 
