@@ -134,15 +134,6 @@ enum ToolpathGeometry {
         /// layers". Empty when the whole print is drawn.
         var omissions: [String] {
             var parts: [String] = []
-            if droppedFeatures.contains(.sparseInfill) { parts.append("no infill") }
-            if droppedFeatures.contains(.innerWall) { parts.append("no inner walls") }
-            if layerStride > 1 { parts.append("1 in \(layerStride) layers") }
-            if tubeStride > 1 { parts.append("1 in \(tubeStride) lines") }
-            return parts
-        }
-
-        var localizedOmissions: [String] {
-            var parts: [String] = []
             if droppedFeatures.contains(.sparseInfill) { parts.append(String(localized: "no infill")) }
             if droppedFeatures.contains(.innerWall) { parts.append(String(localized: "no inner walls")) }
             if layerStride > 1 { parts.append(String(localized: "1 in \(layerStride) layers")) }

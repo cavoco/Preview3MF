@@ -320,7 +320,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         let (scene, model) = SceneBuilder.buildToolpathScene(from: path, appearance: appearance)
         infoLabel.attributedStringValue = NSAttributedString(
-            string: buildInfoString(path, omissions: model?.plan.localizedOmissions ?? []),
+            string: buildInfoString(path, omissions: model?.plan.omissions ?? []),
             attributes: [
                 .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
                 .foregroundColor: foreground,
@@ -447,7 +447,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
         // The print profile gets a line of its own; it is a different kind of fact. The
         // slicer's estimate leads it, since time and filament are what people look for.
-        let printLine = (result.sliceEstimate?.localizedSummary ?? []) + (result.printSettings?.localizedSummary ?? [])
+        let printLine = (result.sliceEstimate?.summary ?? []) + (result.printSettings?.summary ?? [])
         if !printLine.isEmpty {
             line += "\n" + printLine.joined(separator: "  ·  ")
         }
@@ -472,7 +472,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             stats.append(String(localized: "simplified: \(list)"))
         }
         var line = stats.joined(separator: "  ·  ")
-        let printLine = (path.estimate?.localizedSummary ?? []) + (path.printSettings?.localizedSummary ?? [])
+        let printLine = (path.estimate?.summary ?? []) + (path.printSettings?.summary ?? [])
         if !printLine.isEmpty {
             line += "\n" + printLine.joined(separator: "  ·  ")
         }
