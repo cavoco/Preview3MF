@@ -62,6 +62,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         plateLabel = NSTextField(labelWithString: "")
         plateLabel.font = .systemFont(ofSize: 11, weight: .medium)
         plateLabel.alignment = .center
+        plateLabel.lineBreakMode = .byTruncatingTail
+        plateLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         plateSpinner = NSProgressIndicator()
         plateSpinner.style = .spinning
@@ -118,6 +120,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
             infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
             infoLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -8),
+            plateControl.leadingAnchor.constraint(greaterThanOrEqualTo: viewControl.trailingAnchor, constant: 8),
             plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
             viewControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
@@ -133,6 +136,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         super.viewDidLayout()
         // A wrapping label needs to know its width up front to report the right height.
         infoLabel.preferredMaxLayoutWidth = view.bounds.width - 16
+        if let result {
+            let text = plateLabelText(result, index: targetPlate ?? result.plateIndex)
+            if plateLabel.stringValue != text {
+                plateLabel.stringValue = text
+            }
+        }
     }
 
     private func styleOverlay(_ stack: NSStackView) {
@@ -377,6 +386,10 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     private func plateLabelText(_ result: ParseResult, index: Int? = nil) -> String {
         guard let index = index ?? result.plateIndex else { return "" }
+        let width = view.bounds.width
+        if width > 0 && width < 340 {
+            return "\(index + 1)/\(result.plateCount)"
+        }
         let counter = String(localized: "Plate \(index + 1)/\(result.plateCount)")
         if let name = result.plates[index].name, !name.isEmpty {
             return "\(counter) · \(name)"
