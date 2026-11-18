@@ -1,0 +1,426 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ infill" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 填充"
+          }
+        }
+      }
+    },
+    "%@ mm layers" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ mm 层高"
+          }
+        }
+      }
+    },
+    "%@ mm nozzle" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ mm 喷嘴"
+          }
+        }
+      }
+    },
+    "%lldh %lldm" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld小时%2$lld分"
+          }
+        }
+      }
+    },
+    "%lldm" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld分钟"
+          }
+        }
+      }
+    },
+    "**PreviewExtension** — Space-bar 3D preview" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "**3MF 3D 预览** — 访达右侧预览栏与空格交互预览"
+          }
+        }
+      }
+    },
+    "**ThumbnailExtension** — Finder icon previews" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "**3MF 缩略图** — 访达图标直接显示真实模型图"
+          }
+        }
+      }
+    },
+    "1 in %lld layers" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每 %lld 层抽样 1 层"
+          }
+        }
+      }
+    },
+    "1 in %lld lines" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每 %lld 线抽样 1 线"
+          }
+        }
+      }
+    },
+    "3D/3dmodel.model not found in archive" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "压缩包中未找到 3D/3dmodel.model"
+          }
+        }
+      }
+    },
+    "<1m" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "<1分钟"
+          }
+        }
+      }
+    },
+    "Cannot open .3mf archive" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开 .3mf 压缩包"
+          }
+        }
+      }
+    },
+    "Check for Updates…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查更新…"
+          }
+        }
+      }
+    },
+    "Check for updates automatically" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动检查更新"
+          }
+        }
+      }
+    },
+    "Colors" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多色"
+          }
+        }
+      }
+    },
+    "Description" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "简介"
+          }
+        }
+      }
+    },
+    "Designer" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作者"
+          }
+        }
+      }
+    },
+    "Drop a .3mf file here to preview" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将 .3mf 文件拖拽到此处即可直接预览"
+          }
+        }
+      }
+    },
+    "Enable both extensions to use Preview3MF" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在系统设置中启用以下扩展以开启访达预览"
+          }
+        }
+      }
+    },
+    "Estimate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预计消耗"
+          }
+        }
+      }
+    },
+    "Filament" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "耗材"
+          }
+        }
+      }
+    },
+    "Next plate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一盘"
+          }
+        }
+      }
+    },
+    "no infill" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "省略填充"
+          }
+        }
+      }
+    },
+    "no inner walls" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "省略内壁"
+          }
+        }
+      }
+    },
+    "Objects" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对象数"
+          }
+        }
+      }
+    },
+    "Open Quick Look Extensions in System Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前往系统设置开启快速查看扩展"
+          }
+        }
+      }
+    },
+    "Pause rotation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂停旋转"
+          }
+        }
+      }
+    },
+    "Plate %lld/%lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld/%2$lld 盘"
+          }
+        }
+      }
+    },
+    "Previous plate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一盘"
+          }
+        }
+      }
+    },
+    "Print" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打印配置"
+          }
+        }
+      }
+    },
+    "Report a Problem…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问题反馈…"
+          }
+        }
+      }
+    },
+    "Report a problem" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问题反馈"
+          }
+        }
+      }
+    },
+    "Resume rotation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动旋转"
+          }
+        }
+      }
+    },
+    "Size (mm)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尺寸 (mm)"
+          }
+        }
+      }
+    },
+    "Star on GitHub" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 GitHub 上点星"
+          }
+        }
+      }
+    },
+    "Supports" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "含支撑"
+          }
+        }
+      }
+    },
+    "Then press Space on any .3mf file in Finder." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启后，在访达中选中任意 .3mf 文件按空格键即可预览。"
+          }
+        }
+      }
+    },
+    "Title" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名称"
+          }
+        }
+      }
+    },
+    "Triangles" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "三角面"
+          }
+        }
+      }
+    },
+    "Updates are verified against Preview3MF's signing key before they install." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新将在安装前使用 Preview3MF 的签名密钥进行校验。"
+          }
+        }
+      }
+    },
+    "XML parsing failed: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "XML 解析失败：%@"
+          }
+        }
+      }
+    },
+    "Yes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "是"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

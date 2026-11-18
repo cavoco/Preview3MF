@@ -270,6 +270,19 @@ struct PrintSettings: Equatable {
         if supportsEnabled { parts.append("Supports") }
         return parts
     }
+
+    var localizedSummary: [String] {
+        var parts: [String] = []
+        if let printer { parts.append(printer) }
+        if let nozzleDiameter { parts.append(String(localized: "\(nozzleDiameter) mm nozzle")) }
+        if let layerHeight { parts.append(String(localized: "\(layerHeight) mm layers")) }
+        var seen = Set<String>()
+        let types = filamentTypes.filter { seen.insert($0).inserted }
+        if !types.isEmpty { parts.append(types.joined(separator: ", ")) }
+        if let infillDensity { parts.append(String(localized: "\(infillDensity) infill")) }
+        if supportsEnabled { parts.append(String(localized: "Supports")) }
+        return parts
+    }
 }
 
 /// Reads `Metadata/model_settings.config`.
@@ -431,6 +444,22 @@ struct SliceEstimate: Equatable {
         guard minutes > 0 else { return "<1m" }
         let hours = minutes / 60
         return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
+    }
+
+    static func localizedDuration(_ seconds: Int) -> String {
+        let minutes = (seconds + 30) / 60
+        guard minutes > 0 else { return String(localized: "<1m") }
+        let hours = minutes / 60
+        return hours > 0
+            ? String(localized: "\(hours)h \(minutes % 60)m")
+            : String(localized: "\(minutes)m")
+    }
+
+    var localizedSummary: [String] {
+        var parts: [String] = []
+        if let printSeconds { parts.append(Self.localizedDuration(printSeconds)) }
+        if let filamentGrams { parts.append(Self.formatGrams(filamentGrams)) }
+        return parts
     }
 }
 

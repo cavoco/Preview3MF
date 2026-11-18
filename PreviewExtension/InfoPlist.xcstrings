@@ -1,0 +1,42 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "3D Manufacturing Format" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3D 制造格式 (.3mf)"
+          }
+        }
+      }
+    },
+    "CFBundleDisplayName" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PreviewExtension"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3MF 3D 预览"
+          }
+        }
+      }
+    },
+    "G-code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "G-code 刀路文件 (.gcode)"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

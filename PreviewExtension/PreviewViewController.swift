@@ -70,17 +70,17 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         plateSpinner.isHidden = true
 
         plateControl = NSStackView(views: [
-            overlayButton("chevron.left", "Previous plate", #selector(previousPlate)),
+            overlayButton("chevron.left", String(localized: "Previous plate"), #selector(previousPlate)),
             plateLabel,
             plateSpinner,
-            overlayButton("chevron.right", "Next plate", #selector(nextPlate)),
+            overlayButton("chevron.right", String(localized: "Next plate"), #selector(nextPlate)),
         ])
         styleOverlay(plateControl)
         plateControl.isHidden = true
         view.addSubview(plateControl)
 
         // Top-left, mirroring the plate control.
-        spinButton = overlayButton("pause.fill", "Pause rotation", #selector(toggleSpin))
+        spinButton = overlayButton("pause.fill", String(localized: "Pause rotation"), #selector(toggleSpin))
         viewControl = NSStackView(views: [spinButton])
         styleOverlay(viewControl)
         view.addSubview(viewControl)
@@ -97,7 +97,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         layerSlider.isVertical = true
         layerSlider.isContinuous = true
         layerSlider.controlSize = .small
-        layerSlider.setAccessibilityLabel("Layer")
+        layerSlider.setAccessibilityLabel(String(localized: "Layer"))
 
         layerControl = NSStackView(views: [layerLabel, layerSlider])
         styleOverlay(layerControl)
@@ -159,7 +159,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         if let scene = sceneView.scene {
             SceneBuilder.setSpinning(isSpinning, in: scene)
         }
-        let label = isSpinning ? "Pause rotation" : "Resume rotation"
+        let label = isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation")
         spinButton.image = NSImage(systemSymbolName: isSpinning ? "pause.fill" : "play.fill",
                                    accessibilityDescription: label)
         spinButton.setAccessibilityLabel(label)
@@ -320,7 +320,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         let (scene, model) = SceneBuilder.buildToolpathScene(from: path, appearance: appearance)
         infoLabel.attributedStringValue = NSAttributedString(
-            string: buildInfoString(path, omissions: model?.plan.omissions ?? []),
+            string: buildInfoString(path, omissions: model?.plan.localizedOmissions ?? []),
             attributes: [
                 .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
                 .foregroundColor: foreground,
@@ -377,7 +377,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     private func plateLabelText(_ result: ParseResult, index: Int? = nil) -> String {
         guard let index = index ?? result.plateIndex else { return "" }
-        let counter = "Plate \(index + 1)/\(result.plateCount)"
+        let counter = String(localized: "Plate \(index + 1)/\(result.plateCount)")
         if let name = result.plates[index].name, !name.isEmpty {
             return "\(counter) · \(name)"
         }
@@ -427,12 +427,16 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             parts.append(title)
         }
         if let designer = result.metadata.designer {
-            parts.append("by \(designer)")
+            parts.append(String(localized: "by \(designer)"))
         }
 
         var stats: [String] = []
-        stats.append("\(formatNumber(result.totalTriangles)) triangles")
-        stats.append("\(result.objectCount) object\(result.objectCount == 1 ? "" : "s")")
+        let triangleCount = formatNumber(result.totalTriangles)
+        stats.append(String(localized: "\(triangleCount) triangles"))
+        let objectCount = result.objectCount
+        stats.append(objectCount == 1
+            ? String(localized: "\(objectCount) object")
+            : String(localized: "\(objectCount) objects"))
         if let dims = result.dimensions {
             stats.append("\(formatDim(dims.x)) x \(formatDim(dims.y)) x \(formatDim(dims.z)) mm")
         }
@@ -443,7 +447,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
         // The print profile gets a line of its own; it is a different kind of fact. The
         // slicer's estimate leads it, since time and filament are what people look for.
-        let printLine = (result.sliceEstimate?.summary ?? []) + (result.printSettings?.summary ?? [])
+        let printLine = (result.sliceEstimate?.localizedSummary ?? []) + (result.printSettings?.localizedSummary ?? [])
         if !printLine.isEmpty {
             line += "\n" + printLine.joined(separator: "  ·  ")
         }
@@ -455,16 +459,20 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private func buildInfoString(_ path: GCodeToolpath, omissions: [String]) -> String {
         var stats: [String] = []
         if let slicer = path.slicer { stats.append(slicer) }
-        stats.append("\(formatNumber(path.layers.count)) layer\(path.layers.count == 1 ? "" : "s")")
+        let layerCount = formatNumber(path.layers.count)
+        stats.append(path.layers.count == 1
+            ? String(localized: "\(layerCount) layer")
+            : String(localized: "\(layerCount) layers"))
         if let (lower, upper) = path.bounds {
             let size = upper - lower
             stats.append("\(formatDim(size.x)) x \(formatDim(size.y)) x \(formatDim(upper.z)) mm")
         }
         if !omissions.isEmpty {
-            stats.append("simplified: " + omissions.joined(separator: ", "))
+            let list = omissions.joined(separator: ", ")
+            stats.append(String(localized: "simplified: \(list)"))
         }
         var line = stats.joined(separator: "  ·  ")
-        let printLine = (path.estimate?.summary ?? []) + (path.printSettings?.summary ?? [])
+        let printLine = (path.estimate?.localizedSummary ?? []) + (path.printSettings?.localizedSummary ?? [])
         if !printLine.isEmpty {
             line += "\n" + printLine.joined(separator: "  ·  ")
         }

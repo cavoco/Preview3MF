@@ -40,9 +40,10 @@ struct UpdateSettingsView: View {
             Text("Updates are verified against Preview3MF's signing key before they install.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
-        .frame(width: 380)
+        .frame(width: 440)
     }
 }
 

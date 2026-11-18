@@ -163,11 +163,11 @@ enum ThreeMFParserError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .cannotOpenArchive:
-            return "Cannot open .3mf archive"
+            return String(localized: "Cannot open .3mf archive")
         case .modelEntryNotFound:
-            return "3D/3dmodel.model not found in archive"
+            return String(localized: "3D/3dmodel.model not found in archive")
         case .parsingFailed(let reason):
-            return "XML parsing failed: \(reason)"
+            return String(localized: "XML parsing failed: \(reason)")
         }
     }
 }
