@@ -25,11 +25,12 @@ class ThumbnailProvider: QLThumbnailProvider {
            let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) {
             let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
             let reply = QLThumbnailReply(contextSize: maximumSize, drawing: { context -> Bool in
-                let drawRect = ThumbnailProvider.aspectFit(
-                    imageSize: imageSize,
-                    in: ThumbnailProvider.bounds(of: context)
-                )
+                let bounds = ThumbnailProvider.bounds(of: context)
+                let drawRect = ThumbnailProvider.embeddedCoverRect(imageSize: imageSize, in: bounds)
+                context.saveGState()
+                context.clip(to: bounds)
                 context.draw(cgImage, in: drawRect)
+                context.restoreGState()
                 return true
             })
             handler(reply, nil)
@@ -108,6 +109,7 @@ class ThumbnailProvider: QLThumbnailProvider {
     static let thumbnailTubeBudget = 100_000
     /// About 48 MB of toolpath; Finder renders many thumbnails at once.
     static let thumbnailSegmentLimit = 1_000_000
+    static let maxCoverCropFraction: CGFloat = 0.15
 
     /// The whole of a thumbnail's drawing context, in the units it draws in.
     ///
@@ -118,6 +120,20 @@ class ThumbnailProvider: QLThumbnailProvider {
         CGRect(x: 0, y: 0, width: context.width, height: context.height)
             .applying(context.ctm.inverted())
             .standardized
+    }
+
+    private static func embeddedCoverRect(imageSize: CGSize, in rect: CGRect) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0, rect.width > 0, rect.height > 0 else {
+            return rect
+        }
+        let scale = max(rect.width / imageSize.width, rect.height / imageSize.height)
+        let w = imageSize.width * scale
+        let h = imageSize.height * scale
+        let croppedFraction = 1 - min(rect.width / w, rect.height / h)
+        if croppedFraction <= maxCoverCropFraction {
+            return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
+        }
+        return aspectFit(imageSize: imageSize, in: rect)
     }
 
     private static func aspectFit(imageSize: CGSize, in rect: CGRect) -> CGRect {
