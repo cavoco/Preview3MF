@@ -62,11 +62,14 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         infoLabel.isBezeled = false
         infoLabel.isEditable = false
         infoLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        infoLabel.setContentHuggingPriority(.required, for: .horizontal)
         infoLabel.setContentHuggingPriority(.required, for: .vertical)
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
         infoContainer.addSubview(infoLabel)
 
         infoExpandButton = overlayButton("chevron.up", "Show full info", #selector(toggleInfoExpanded))
+        infoExpandButton.setContentHuggingPriority(.required, for: .horizontal)
+        infoExpandButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         infoExpandButton.translatesAutoresizingMaskIntoConstraints = false
         infoContainer.addSubview(infoExpandButton)
         applyInfoExpansionState()
@@ -181,16 +184,25 @@ class PreviewViewController: NSViewController, QLPreviewingController {
                 plateLabel.stringValue = text
             }
         }
+        // The one-line pill shows only the items that fit whole, so re-fit it when the
+        // panel is resized.
+        if !isInfoExpanded, abs(availableInfoTextWidth - lastFittedInfoWidth) > 0.5 {
+            updateInfoText(foreground: infoLabel.textColor ?? .labelColor)
+        }
+    }
+
+    private var lastFittedInfoWidth: CGFloat = 0
+    private static let infoSeparator = "  ·  "
+
+    /// Width the info text may use inside its pill, beside the expand chevron and clear of
+    /// the layer slider when there is one.
+    private var availableInfoTextWidth: CGFloat {
+        let layerWidth: CGFloat = layerControl.isHidden ? 0 : (max(layerControl.frame.width, 64) + 8)
+        return max(60, view.bounds.width - 16 - layerWidth - 12 - 6 - 18 - 10 - 6)
     }
 
     private func updateInfoPreferredMaxWidth() {
-        guard isInfoExpanded else {
-            infoLabel.preferredMaxLayoutWidth = 0
-            return
-        }
-        let layerWidth: CGFloat = layerControl.isHidden ? 0 : (max(layerControl.frame.width, 64) + 8)
-        let available = view.bounds.width - 16 - layerWidth - 12 - 6 - 18 - 10
-        infoLabel.preferredMaxLayoutWidth = max(120, available)
+        infoLabel.preferredMaxLayoutWidth = isInfoExpanded ? availableInfoTextWidth : 0
     }
 
     private func styleOverlay(_ stack: NSStackView) {
@@ -239,10 +251,14 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     private func applyInfoExpansionState() {
         if isInfoExpanded {
+            infoLabel.usesSingleLineMode = false
+            infoLabel.cell?.wraps = true
             infoLabel.maximumNumberOfLines = 0
             infoLabel.lineBreakMode = .byWordWrapping
             infoContainer.layer?.cornerRadius = 10
         } else {
+            infoLabel.usesSingleLineMode = true
+            infoLabel.cell?.wraps = false
             infoLabel.maximumNumberOfLines = 1
             infoLabel.lineBreakMode = .byTruncatingTail
             infoContainer.layer?.cornerRadius = 15
@@ -412,16 +428,51 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     }
 
     private func updateInfoText(foreground: NSColor) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: foreground,
+        ]
+        let groups: [[String]]
         if let result {
-            infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground, expanded: isInfoExpanded)
+            groups = infoGroups(result)
         } else if let path = lastGCodePath {
-            infoLabel.attributedStringValue = NSAttributedString(
-                string: buildInfoString(path, omissions: lastGCodeOmissions, expanded: isInfoExpanded),
-                attributes: [
-                    .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                    .foregroundColor: foreground,
-                ])
+            groups = infoGroups(path, omissions: lastGCodeOmissions)
+        } else {
+            return
         }
+        let nonEmpty = groups.filter { !$0.isEmpty }
+
+        if isInfoExpanded {
+            let body = nonEmpty.map { $0.joined(separator: Self.infoSeparator) }.joined(separator: "\n")
+            let text = NSMutableAttributedString(string: body, attributes: attributes)
+            if let result {
+                appendFilamentBreakdown(result, to: text, attributes: attributes, foreground: foreground)
+            }
+            infoLabel.attributedStringValue = text
+        } else {
+            let width = availableInfoTextWidth
+            lastFittedInfoWidth = width
+            let line = fittedLine(nonEmpty.flatMap { $0 }, width: width, attributes: attributes)
+            infoLabel.attributedStringValue = NSAttributedString(string: line, attributes: attributes)
+        }
+        infoLabel.invalidateIntrinsicContentSize()
+    }
+
+    /// As many whole items as fit in `width`, joined by the separator. Never ends on a
+    /// separator or cuts an item in half; only a single item too long on its own is left to
+    /// the label's tail truncation.
+    private func fittedLine(_ items: [String], width: CGFloat,
+                            attributes: [NSAttributedString.Key: Any]) -> String {
+        var line = ""
+        for item in items {
+            let candidate = line.isEmpty ? item : line + Self.infoSeparator + item
+            if ceil((candidate as NSString).size(withAttributes: attributes).width) <= width {
+                line = candidate
+            } else {
+                break
+            }
+        }
+        return line.isEmpty ? (items.first ?? "") : line
     }
 
     /// A G-code file: one print, so no plates to page through.
@@ -501,14 +552,9 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         return counter
     }
 
-    /// The info text, plus a line of colour-swatched weights for a multi-filament plate.
-    private func buildInfoText(_ result: ParseResult, foreground: NSColor, expanded: Bool) -> NSAttributedString {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: foreground,
-        ]
-        let text = NSMutableAttributedString(string: buildInfoString(result, expanded: expanded), attributes: attributes)
-        guard expanded else { return text }
+    /// A line of colour-swatched weights for a multi-filament plate, under the full info.
+    private func appendFilamentBreakdown(_ result: ParseResult, to text: NSMutableAttributedString,
+                                         attributes: [NSAttributedString.Key: Any], foreground: NSColor) {
         let breakdown = result.sliceEstimate?.filamentBreakdown ?? []
         for (index, filament) in breakdown.enumerated() {
             text.append(NSAttributedString(string: index == 0 ? "\n" : "   ", attributes: attributes))
@@ -518,7 +564,6 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             text.append(NSAttributedString(attachment: swatch))
             text.append(NSAttributedString(string: " " + filament.label, attributes: attributes))
         }
-        return text
     }
 
     /// A filled dot in the filament's colour, outlined so white filament still shows against
@@ -538,15 +583,9 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
     }
 
-    private func formatInfoGroups(_ groups: [[String]], expanded: Bool) -> String {
-        let nonEmpty = groups.filter { !$0.isEmpty }
-        if expanded {
-            return nonEmpty.map { $0.joined(separator: "  ·  ") }.joined(separator: "\n")
-        }
-        return nonEmpty.flatMap { $0 }.joined(separator: "  ·  ")
-    }
-
-    private func buildInfoString(_ result: ParseResult, expanded: Bool) -> String {
+    /// Info in order of importance: what printing it takes, then the model's shape, then
+    /// who made it. Each group is a line when expanded; collapsed, they run together.
+    private func infoGroups(_ result: ParseResult) -> [[String]] {
         let printGroup = (result.sliceEstimate?.summary ?? [])
             + (result.printSettings?.prioritizedSummary ?? [])
 
@@ -569,11 +608,11 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             attributionGroup.append(String(localized: "by \(designer)"))
         }
 
-        return formatInfoGroups([printGroup, geometryGroup, attributionGroup], expanded: expanded)
+        return [printGroup, geometryGroup, attributionGroup]
     }
 
-    /// "2h 14m · 38.2 g · PLA", then toolpath & print profile details.
-    private func buildInfoString(_ path: GCodeToolpath, omissions: [String], expanded: Bool) -> String {
+    /// A G-code file's info: the print first, then the toolpath and how it was drawn.
+    private func infoGroups(_ path: GCodeToolpath, omissions: [String]) -> [[String]] {
         let printGroup = (path.estimate?.summary ?? [])
             + (path.printSettings?.prioritizedSummary ?? [])
 
@@ -592,7 +631,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             toolpathGroup.append(String(localized: "simplified: \(list)"))
         }
 
-        return formatInfoGroups([printGroup, toolpathGroup], expanded: expanded)
+        return [printGroup, toolpathGroup]
     }
 
     private func formatNumber(_ n: Int) -> String {
