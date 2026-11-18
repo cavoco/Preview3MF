@@ -9,6 +9,8 @@ struct ContentView: View {
     @State private var parseResult: ParseResult?
     @State private var errorMessage: String?
     @State private var isSpinning = true
+    @AppStorage(SharedPreferences.autoRotateByDefaultKey, store: SharedPreferences.defaults)
+    private var autoRotateByDefault = true
     /// The plate paging is heading for while its model files load; nil once it's shown.
     @State private var targetPlate: Int?
     @State private var isLoadingPlate = false
@@ -119,6 +121,12 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(minWidth: 500, minHeight: 500)
+        .onAppear {
+            isSpinning = autoRotateByDefault
+        }
+        .onChange(of: autoRotateByDefault) { newValue in
+            isSpinning = newValue
+        }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -199,6 +207,7 @@ struct ContentView: View {
         fileGeneration += 1
         targetPlate = nil
         isLoadingPlate = false
+        isSpinning = autoRotateByDefault
         do {
             let result = try ThreeMFParser.parse(fileAt: url)
             let appearance: SceneBuilder.Appearance = colorScheme == .dark ? .dark : .light
