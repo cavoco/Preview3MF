@@ -5,7 +5,10 @@ import SceneKit
 class PreviewViewController: NSViewController, QLPreviewingController {
 
     private var sceneView: ZoomableSCNView!
+    private var infoContainer: NSView!
     private var infoLabel: NSTextField!
+    private var infoExpandButton: NSButton!
+    private var isInfoExpanded = false
     private var plateControl: NSStackView!
     private var plateLabel: NSTextField!
     private var viewportSpinner: NSView!
@@ -20,6 +23,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     /// The G-code on show, and its drawn toolpath, for the layer slider.
     private var toolpath: GCodeToolpath?
     private var toolpathModel: ToolpathGeometry.Model?
+    private var lastGCodePath: GCodeToolpath?
+    private var lastGCodeOmissions: [String] = []
     private var result: ParseResult?
     /// Survives paging, which swaps in a freshly built (spinning) scene.
     private var isSpinning = true
@@ -44,20 +49,27 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         sceneView.isPlaying = true   // keep painting during the settle
         view.addSubview(sceneView)
 
+        infoContainer = NSView()
+        infoContainer.wantsLayer = true
+        infoContainer.layer?.cornerRadius = 15
+        infoContainer.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(infoContainer)
+
         infoLabel = NSTextField(labelWithString: "")
         infoLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         infoLabel.textColor = .secondaryLabelColor
-        infoLabel.backgroundColor = NSColor(white: 0, alpha: 0.5)
-        infoLabel.drawsBackground = true
+        infoLabel.drawsBackground = false
         infoLabel.isBezeled = false
         infoLabel.isEditable = false
-        // Wrap rather than run off the edge: the Quick Look panel opens narrow, and the
-        // print-profile line would otherwise only show once the panel is widened.
-        infoLabel.maximumNumberOfLines = 0
-        infoLabel.lineBreakMode = .byWordWrapping
         infoLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        infoLabel.setContentHuggingPriority(.required, for: .vertical)
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(infoLabel)
+        infoContainer.addSubview(infoLabel)
+
+        infoExpandButton = overlayButton("chevron.up", "Show full info", #selector(toggleInfoExpanded))
+        infoExpandButton.translatesAutoresizingMaskIntoConstraints = false
+        infoContainer.addSubview(infoExpandButton)
+        applyInfoExpansionState()
 
         // Top-right, clear of the info label along the bottom edge.
         plateLabel = NSTextField(labelWithString: "")
@@ -117,17 +129,31 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         layerControl.isHidden = true
         view.addSubview(layerControl)
 
-        infoClearOfLayers = infoLabel.trailingAnchor.constraint(
+        infoClearOfLayers = infoContainer.trailingAnchor.constraint(
             lessThanOrEqualTo: layerControl.leadingAnchor, constant: -8)
+
+        let infoCenterY = infoLabel.centerYAnchor.constraint(equalTo: infoContainer.centerYAnchor)
+        infoCenterY.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
             layerControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             layerControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
             layerControl.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
             layerControl.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
-            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
-            infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
-            infoLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -8),
+            infoContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            infoContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
+            infoContainer.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -8),
+            infoContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
+            infoLabel.leadingAnchor.constraint(equalTo: infoContainer.leadingAnchor, constant: 12),
+            infoLabel.topAnchor.constraint(greaterThanOrEqualTo: infoContainer.topAnchor, constant: 6),
+            infoLabel.bottomAnchor.constraint(lessThanOrEqualTo: infoContainer.bottomAnchor, constant: -6),
+            infoCenterY,
+            infoExpandButton.leadingAnchor.constraint(equalTo: infoLabel.trailingAnchor, constant: 6),
+            infoExpandButton.trailingAnchor.constraint(equalTo: infoContainer.trailingAnchor, constant: -10),
+            infoExpandButton.topAnchor.constraint(equalTo: infoContainer.topAnchor, constant: 5),
+            infoExpandButton.bottomAnchor.constraint(lessThanOrEqualTo: infoContainer.bottomAnchor, constant: -5),
+            infoExpandButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
+            infoExpandButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 20),
             plateControl.leadingAnchor.constraint(greaterThanOrEqualTo: viewControl.trailingAnchor, constant: 8),
             plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
@@ -148,14 +174,23 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        // A wrapping label needs to know its width up front to report the right height.
-        infoLabel.preferredMaxLayoutWidth = view.bounds.width - 16
+        updateInfoPreferredMaxWidth()
         if let result {
             let text = plateLabelText(result, index: targetPlate ?? result.plateIndex)
             if plateLabel.stringValue != text {
                 plateLabel.stringValue = text
             }
         }
+    }
+
+    private func updateInfoPreferredMaxWidth() {
+        guard isInfoExpanded else {
+            infoLabel.preferredMaxLayoutWidth = 0
+            return
+        }
+        let layerWidth: CGFloat = layerControl.isHidden ? 0 : (max(layerControl.frame.width, 64) + 8)
+        let available = view.bounds.width - 16 - layerWidth - 12 - 6 - 18 - 10
+        infoLabel.preferredMaxLayoutWidth = max(120, available)
     }
 
     private func styleOverlay(_ stack: NSStackView) {
@@ -187,6 +222,37 @@ class PreviewViewController: NSViewController, QLPreviewingController {
                                    accessibilityDescription: label)
         spinButton.setAccessibilityLabel(label)
         spinButton.toolTip = label
+    }
+
+    @objc private func toggleInfoExpanded() {
+        isInfoExpanded.toggle()
+        applyInfoExpansionState()
+        let foreground = styleOverlays(for: currentAppearance)
+        updateInfoText(foreground: foreground)
+        updateInfoPreferredMaxWidth()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            self.view.layoutSubtreeIfNeeded()
+        }
+    }
+
+    private func applyInfoExpansionState() {
+        if isInfoExpanded {
+            infoLabel.maximumNumberOfLines = 0
+            infoLabel.lineBreakMode = .byWordWrapping
+            infoContainer.layer?.cornerRadius = 10
+        } else {
+            infoLabel.maximumNumberOfLines = 1
+            infoLabel.lineBreakMode = .byTruncatingTail
+            infoContainer.layer?.cornerRadius = 15
+        }
+        let label = isInfoExpanded ? "Collapse info" : "Show full info"
+        infoExpandButton.image = NSImage(
+            systemSymbolName: isInfoExpanded ? "chevron.down" : "chevron.up",
+            accessibilityDescription: label)
+        infoExpandButton.setAccessibilityLabel(label)
+        infoExpandButton.toolTip = label
     }
 
     @objc private func layerSliderMoved() {
@@ -293,6 +359,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         targetPlate = nil
         isLoadingPlate = false
         setViewportLoading(false)
+        isInfoExpanded = false
+        applyInfoExpansionState()
         do {
             if GCodeParser.isGCode(url) {
                 let path = try GCodeParser.parse(fileAt: url, segmentLimit: GCodeParser.previewSegmentLimit)
@@ -332,14 +400,28 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         let overlayBackground = appearance == .dark
             ? NSColor(white: 0, alpha: 0.5)
             : NSColor(white: 1, alpha: 0.6)
-        infoLabel.backgroundColor = overlayBackground
+        infoContainer.layer?.backgroundColor = overlayBackground.cgColor
         plateControl.layer?.backgroundColor = overlayBackground.cgColor
         viewControl.layer?.backgroundColor = overlayBackground.cgColor
         viewportSpinner.layer?.backgroundColor = overlayBackground.cgColor
         layerControl.layer?.backgroundColor = overlayBackground.cgColor
         layerLabel.textColor = foreground
         spinButton.contentTintColor = foreground
+        infoExpandButton.contentTintColor = foreground
         return foreground
+    }
+
+    private func updateInfoText(foreground: NSColor) {
+        if let result {
+            infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground, expanded: isInfoExpanded)
+        } else if let path = lastGCodePath {
+            infoLabel.attributedStringValue = NSAttributedString(
+                string: buildInfoString(path, omissions: lastGCodeOmissions, expanded: isInfoExpanded),
+                attributes: [
+                    .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                    .foregroundColor: foreground,
+                ])
+        }
     }
 
     /// A G-code file: one print, so no plates to page through.
@@ -349,13 +431,11 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         plateControl.isHidden = true
 
         let (scene, model) = SceneBuilder.buildToolpathScene(from: path, appearance: appearance)
-        infoLabel.attributedStringValue = NSAttributedString(
-            string: buildInfoString(path, omissions: model?.plan.omissions ?? []),
-            attributes: [
-                .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                .foregroundColor: foreground,
-            ])
+        lastGCodePath = path
+        lastGCodeOmissions = model?.plan.omissions ?? []
+        updateInfoText(foreground: foreground)
         setLayerControl(for: path, model: model)
+        updateInfoPreferredMaxWidth()
         SceneBuilder.setSpinning(isSpinning, in: scene)
         sceneView.scene = scene
         // Same first-frame settle as a 3MF's first render.
@@ -370,9 +450,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         // Text first. It costs nothing to set, and paging should feel immediate even
         // though rebuilding the geometry behind it does not.
         let foreground = styleOverlays(for: appearance)
-        infoLabel.attributedStringValue = buildInfoText(result, foreground: foreground)
+        lastGCodePath = nil
+        lastGCodeOmissions = []
+        updateInfoText(foreground: foreground)
 
         setLayerControl(for: nil, model: nil)
+        updateInfoPreferredMaxWidth()
 
         // Only worth showing when there is somewhere to page to.
         let populated = result.plates.filter { $0.hasGeometry }.count
@@ -419,12 +502,13 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     }
 
     /// The info text, plus a line of colour-swatched weights for a multi-filament plate.
-    private func buildInfoText(_ result: ParseResult, foreground: NSColor) -> NSAttributedString {
+    private func buildInfoText(_ result: ParseResult, foreground: NSColor, expanded: Bool) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: infoLabel.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
             .foregroundColor: foreground,
         ]
-        let text = NSMutableAttributedString(string: buildInfoString(result), attributes: attributes)
+        let text = NSMutableAttributedString(string: buildInfoString(result, expanded: expanded), attributes: attributes)
+        guard expanded else { return text }
         let breakdown = result.sliceEstimate?.filamentBreakdown ?? []
         for (index, filament) in breakdown.enumerated() {
             text.append(NSAttributedString(string: index == 0 ? "\n" : "   ", attributes: attributes))
@@ -454,63 +538,61 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
     }
 
-    private func buildInfoString(_ result: ParseResult) -> String {
-        var parts: [String] = []
-
-        if let title = result.metadata.title {
-            parts.append(title)
+    private func formatInfoGroups(_ groups: [[String]], expanded: Bool) -> String {
+        let nonEmpty = groups.filter { !$0.isEmpty }
+        if expanded {
+            return nonEmpty.map { $0.joined(separator: "  ·  ") }.joined(separator: "\n")
         }
-        if let designer = result.metadata.designer {
-            parts.append(String(localized: "by \(designer)"))
-        }
-
-        var stats: [String] = []
-        let triangleCount = formatNumber(result.totalTriangles)
-        stats.append(String(localized: "\(triangleCount) triangles"))
-        let objectCount = result.objectCount
-        stats.append(objectCount == 1
-            ? String(localized: "\(objectCount) object")
-            : String(localized: "\(objectCount) objects"))
-        if let dims = result.dimensions {
-            stats.append("\(formatDim(dims.x)) x \(formatDim(dims.y)) x \(formatDim(dims.z)) mm")
-        }
-
-        var line = stats.joined(separator: "  ·  ")
-        if !parts.isEmpty {
-            line = parts.joined(separator: " ") + "  ·  " + line
-        }
-        // The print profile gets a line of its own; it is a different kind of fact. The
-        // slicer's estimate leads it, since time and filament are what people look for.
-        let printLine = (result.sliceEstimate?.summary ?? []) + (result.printSettings?.summary ?? [])
-        if !printLine.isEmpty {
-            line += "\n" + printLine.joined(separator: "  ·  ")
-        }
-        return line
+        return nonEmpty.flatMap { $0 }.joined(separator: "  ·  ")
     }
 
-    /// "PrusaSlicer 2.4.2  ·  569 layers  ·  60 x 25 x 91 mm", then the print profile line.
-    /// A print too big to draw whole says what it's drawn without: "simplified: no infill".
-    private func buildInfoString(_ path: GCodeToolpath, omissions: [String]) -> String {
-        var stats: [String] = []
-        if let slicer = path.slicer { stats.append(slicer) }
+    private func buildInfoString(_ result: ParseResult, expanded: Bool) -> String {
+        let printGroup = (result.sliceEstimate?.summary ?? [])
+            + (result.printSettings?.prioritizedSummary ?? [])
+
+        var geometryGroup: [String] = []
+        if let dims = result.dimensions {
+            geometryGroup.append("\(formatDim(dims.x)) x \(formatDim(dims.y)) x \(formatDim(dims.z)) mm")
+        }
+        let objectCount = result.objectCount
+        geometryGroup.append(objectCount == 1
+            ? String(localized: "\(objectCount) object")
+            : String(localized: "\(objectCount) objects"))
+        let triangleCount = formatNumber(result.totalTriangles)
+        geometryGroup.append(String(localized: "\(triangleCount) triangles"))
+
+        var attributionGroup: [String] = []
+        if let title = result.metadata.title {
+            attributionGroup.append(title)
+        }
+        if let designer = result.metadata.designer {
+            attributionGroup.append(String(localized: "by \(designer)"))
+        }
+
+        return formatInfoGroups([printGroup, geometryGroup, attributionGroup], expanded: expanded)
+    }
+
+    /// "2h 14m · 38.2 g · PLA", then toolpath & print profile details.
+    private func buildInfoString(_ path: GCodeToolpath, omissions: [String], expanded: Bool) -> String {
+        let printGroup = (path.estimate?.summary ?? [])
+            + (path.printSettings?.prioritizedSummary ?? [])
+
+        var toolpathGroup: [String] = []
         let layerCount = formatNumber(path.layers.count)
-        stats.append(path.layers.count == 1
+        toolpathGroup.append(path.layers.count == 1
             ? String(localized: "\(layerCount) layer")
             : String(localized: "\(layerCount) layers"))
         if let (lower, upper) = path.bounds {
             let size = upper - lower
-            stats.append("\(formatDim(size.x)) x \(formatDim(size.y)) x \(formatDim(upper.z)) mm")
+            toolpathGroup.append("\(formatDim(size.x)) x \(formatDim(size.y)) x \(formatDim(upper.z)) mm")
         }
+        if let slicer = path.slicer { toolpathGroup.append(slicer) }
         if !omissions.isEmpty {
             let list = omissions.joined(separator: ", ")
-            stats.append(String(localized: "simplified: \(list)"))
+            toolpathGroup.append(String(localized: "simplified: \(list)"))
         }
-        var line = stats.joined(separator: "  ·  ")
-        let printLine = (path.estimate?.summary ?? []) + (path.printSettings?.summary ?? [])
-        if !printLine.isEmpty {
-            line += "\n" + printLine.joined(separator: "  ·  ")
-        }
-        return line
+
+        return formatInfoGroups([printGroup, toolpathGroup], expanded: expanded)
     }
 
     private func formatNumber(_ n: Int) -> String {
