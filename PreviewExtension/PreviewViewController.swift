@@ -8,6 +8,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private var infoLabel: NSTextField!
     private var plateControl: NSStackView!
     private var plateLabel: NSTextField!
+    private var viewportSpinner: NSView!
     private var plateSpinner: NSProgressIndicator!
     private var viewControl: NSStackView!
     private var spinButton: NSButton!
@@ -65,21 +66,28 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         plateLabel.lineBreakMode = .byTruncatingTail
         plateLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        plateSpinner = NSProgressIndicator()
-        plateSpinner.style = .spinning
-        plateSpinner.controlSize = .small
-        plateSpinner.isDisplayedWhenStopped = false
-        plateSpinner.isHidden = true
-
         plateControl = NSStackView(views: [
             overlayButton("chevron.left", String(localized: "Previous plate"), #selector(previousPlate)),
             plateLabel,
-            plateSpinner,
             overlayButton("chevron.right", String(localized: "Next plate"), #selector(nextPlate)),
         ])
         styleOverlay(plateControl)
         plateControl.isHidden = true
         view.addSubview(plateControl)
+
+        plateSpinner = NSProgressIndicator()
+        plateSpinner.style = .spinning
+        plateSpinner.controlSize = .regular
+        plateSpinner.isDisplayedWhenStopped = false
+        plateSpinner.translatesAutoresizingMaskIntoConstraints = false
+
+        viewportSpinner = NSView()
+        viewportSpinner.wantsLayer = true
+        viewportSpinner.layer?.cornerRadius = 18
+        viewportSpinner.translatesAutoresizingMaskIntoConstraints = false
+        viewportSpinner.isHidden = true
+        viewportSpinner.addSubview(plateSpinner)
+        view.addSubview(viewportSpinner)
 
         // Top-left, mirroring the plate control.
         spinButton = overlayButton("pause.fill", String(localized: "Pause rotation"), #selector(toggleSpin))
@@ -123,6 +131,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             plateControl.leadingAnchor.constraint(greaterThanOrEqualTo: viewControl.trailingAnchor, constant: 8),
             plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            viewportSpinner.centerXAnchor.constraint(equalTo: sceneView.centerXAnchor),
+            viewportSpinner.centerYAnchor.constraint(equalTo: sceneView.centerYAnchor),
+            viewportSpinner.widthAnchor.constraint(equalToConstant: 36),
+            viewportSpinner.heightAnchor.constraint(equalToConstant: 36),
+            plateSpinner.centerXAnchor.constraint(equalTo: viewportSpinner.centerXAnchor),
+            plateSpinner.centerYAnchor.constraint(equalTo: viewportSpinner.centerYAnchor),
             viewControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
             viewControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
         ])
@@ -250,16 +264,14 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
 
         isLoadingPlate = true
-        plateSpinner.isHidden = false
-        plateSpinner.startAnimation(nil)
+        setViewportLoading(true)
         let generation = fileGeneration
         plateLoadQueue.async { [weak self] in
             let loaded = try? base.loadingPlate(target)
             DispatchQueue.main.async {
                 guard let self, generation == self.fileGeneration else { return }
                 self.isLoadingPlate = false
-                self.plateSpinner.stopAnimation(nil)
-                self.plateSpinner.isHidden = true
+                self.setViewportLoading(false)
                 if let loaded {
                     self.showTargetPlate(from: loaded)
                 } else if let result = self.result {
@@ -280,8 +292,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         fileGeneration += 1
         targetPlate = nil
         isLoadingPlate = false
-        plateSpinner.stopAnimation(nil)
-        plateSpinner.isHidden = true
+        setViewportLoading(false)
         do {
             if GCodeParser.isGCode(url) {
                 let path = try GCodeParser.parse(fileAt: url, segmentLimit: GCodeParser.previewSegmentLimit)
@@ -302,6 +313,15 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
     }
 
+    private func setViewportLoading(_ loading: Bool) {
+        viewportSpinner.isHidden = !loading
+        if loading {
+            plateSpinner.startAnimation(nil)
+        } else {
+            plateSpinner.stopAnimation(nil)
+        }
+    }
+
     /// Colours the overlays for the current appearance, and returns the text colour.
     private func styleOverlays(for appearance: SceneBuilder.Appearance) -> NSColor {
         let foreground = appearance == .dark
@@ -315,6 +335,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         infoLabel.backgroundColor = overlayBackground
         plateControl.layer?.backgroundColor = overlayBackground.cgColor
         viewControl.layer?.backgroundColor = overlayBackground.cgColor
+        viewportSpinner.layer?.backgroundColor = overlayBackground.cgColor
         layerControl.layer?.backgroundColor = overlayBackground.cgColor
         layerLabel.textColor = foreground
         spinButton.contentTintColor = foreground

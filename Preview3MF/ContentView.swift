@@ -73,8 +73,16 @@ struct ContentView: View {
                     .overlay(alignment: .topTrailing) {
                         if let result = parseResult, populatedPlateCount(result) > 1 {
                             PlateSwitcher(result: result, index: targetPlate ?? result.plateIndex,
-                                          isLoading: isLoadingPlate, step: stepPlate)
+                                          step: stepPlate)
                                 .padding(10)
+                        }
+                    }
+                    .overlay {
+                        if isLoadingPlate {
+                            ProgressView()
+                                .controlSize(.regular)
+                                .padding(12)
+                                .background(.regularMaterial, in: Circle())
                         }
                     }
             } else {
@@ -317,7 +325,6 @@ struct PlateSwitcher: View {
     let result: ParseResult
     /// The plate to name — the one being paged to, while it loads.
     let index: Int?
-    let isLoading: Bool
     let step: (Int) -> Void
 
     var body: some View {
@@ -327,9 +334,6 @@ struct PlateSwitcher: View {
             Text(verbatim: label)
                 .font(.caption.weight(.medium))
                 .monospacedDigit()
-            if isLoading {
-                ProgressView().controlSize(.mini)
-            }
             Button { step(1) } label: { Image(systemName: "chevron.right") }
                 .accessibilityLabel(String(localized: "Next plate"))
         }
