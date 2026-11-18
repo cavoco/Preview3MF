@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		305C24D730AB476C00097453 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 305C24D630AB476C00097453 /* Localizable.xcstrings */; };
+		305C24DA30AB478900097453 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 305C24D930AB478900097453 /* InfoPlist.xcstrings */; };
+		305C24DD30AB479000097453 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 305C24D830AB476D00097453 /* Localizable.xcstrings */; };
+		305C24DE30AB479100097453 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 305C24DB30AB478B00097453 /* InfoPlist.xcstrings */; };
+		305C24DF30AB479200097453 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 305C24DC30AB478D00097453 /* InfoPlist.xcstrings */; };
 		A100000001 /* Preview3MFApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000001 /* Preview3MFApp.swift */; };
 		A100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000002 /* ContentView.swift */; };
 		A100000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A200000003 /* Assets.xcassets */; };
@@ -79,6 +84,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		305C24D630AB476C00097453 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		305C24D830AB476D00097453 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		305C24D930AB478900097453 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
+		305C24DB30AB478B00097453 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
+		305C24DC30AB478D00097453 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		A200000001 /* Preview3MFApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preview3MFApp.swift; sourceTree = "<group>"; };
 		A200000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A200000003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -161,6 +171,8 @@
 				A200000003 /* Assets.xcassets */,
 				A200000004 /* Info.plist */,
 				A200000005 /* Preview3MF.entitlements */,
+				305C24D630AB476C00097453 /* Localizable.xcstrings */,
+				305C24D930AB478900097453 /* InfoPlist.xcstrings */,
 			);
 			path = Preview3MF;
 			sourceTree = "<group>";
@@ -171,6 +183,8 @@
 				A200000020 /* PreviewViewController.swift */,
 				A200000021 /* Info.plist */,
 				A200000022 /* PreviewExtension.entitlements */,
+				305C24D830AB476D00097453 /* Localizable.xcstrings */,
+				305C24DB30AB478B00097453 /* InfoPlist.xcstrings */,
 			);
 			path = PreviewExtension;
 			sourceTree = "<group>";
@@ -215,6 +229,7 @@
 				A200000040 /* ThumbnailProvider.swift */,
 				A200000041 /* Info.plist */,
 				A200000042 /* ThumbnailExtension.entitlements */,
+				305C24DC30AB478D00097453 /* InfoPlist.xcstrings */,
 			);
 			path = ThumbnailExtension;
 			sourceTree = "<group>";
@@ -228,6 +243,7 @@
 			buildPhases = (
 				AA00000002 /* Sources */,
 				A800000002 /* Frameworks */,
+				AA00000006 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -288,6 +304,7 @@
 			buildPhases = (
 				AA00000005 /* Sources */,
 				A800000004 /* Frameworks */,
+				AA00000007 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -333,6 +350,7 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = A900000001;
 			packageReferences = (
@@ -356,7 +374,26 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				305C24DA30AB478900097453 /* InfoPlist.xcstrings in Resources */,
+				305C24D730AB476C00097453 /* Localizable.xcstrings in Resources */,
 				A100000003 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA00000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				305C24DD30AB479000097453 /* Localizable.xcstrings in Resources */,
+				305C24DE30AB479100097453 /* InfoPlist.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA00000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				305C24DF30AB479200097453 /* InfoPlist.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

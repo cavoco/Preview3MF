@@ -20,7 +20,7 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Preview3MF")
+            Text(verbatim: "Preview3MF")
                 .font(.largeTitle.bold())
 
             VStack(spacing: 10) {
@@ -226,10 +226,10 @@ struct ModelInfoView: View {
             if let description = result.metadata.description {
                 LabeledContent("Description", value: description)
             }
-            if let settings = result.printSettings?.summary, !settings.isEmpty {
+            if let settings = result.printSettings?.localizedSummary, !settings.isEmpty {
                 LabeledContent("Print", value: settings.joined(separator: " · "))
             }
-            if let estimate = result.sliceEstimate?.summary, !estimate.isEmpty {
+            if let estimate = result.sliceEstimate?.localizedSummary, !estimate.isEmpty {
                 LabeledContent("Estimate", value: estimate.joined(separator: " · "))
             }
             if let breakdown = result.sliceEstimate?.filamentBreakdown, !breakdown.isEmpty {
@@ -256,7 +256,7 @@ struct ModelInfoView: View {
                              value: "\(Self.formatDim(dims.x)) x \(Self.formatDim(dims.y)) x \(Self.formatDim(dims.z))")
                 }
                 if result.hasColors {
-                    StatItem(label: "Colors", value: "Yes")
+                    StatItem(label: "Colors", value: String(localized: "Yes"))
                 }
             }
         }
@@ -302,8 +302,8 @@ struct ViewControls: View {
             Button { isSpinning.toggle() } label: {
                 Image(systemName: isSpinning ? "pause.fill" : "play.fill")
             }
-            .help(isSpinning ? "Pause rotation" : "Resume rotation")
-            .accessibilityLabel(isSpinning ? "Pause rotation" : "Resume rotation")
+            .help(isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation"))
+            .accessibilityLabel(isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation"))
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 8)
@@ -323,15 +323,15 @@ struct PlateSwitcher: View {
     var body: some View {
         HStack(spacing: 6) {
             Button { step(-1) } label: { Image(systemName: "chevron.left") }
-                .accessibilityLabel("Previous plate")
-            Text(label)
+                .accessibilityLabel(String(localized: "Previous plate"))
+            Text(verbatim: label)
                 .font(.caption.weight(.medium))
                 .monospacedDigit()
             if isLoading {
                 ProgressView().controlSize(.mini)
             }
             Button { step(1) } label: { Image(systemName: "chevron.right") }
-                .accessibilityLabel("Next plate")
+                .accessibilityLabel(String(localized: "Next plate"))
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 8)
@@ -341,7 +341,7 @@ struct PlateSwitcher: View {
 
     private var label: String {
         guard let index else { return "" }
-        let counter = "Plate \(index + 1)/\(result.plateCount)"
+        let counter = String(localized: "Plate \(index + 1)/\(result.plateCount)")
         if let name = result.plates[index].name, !name.isEmpty {
             return "\(counter) · \(name)"
         }
@@ -350,12 +350,12 @@ struct PlateSwitcher: View {
 }
 
 struct StatItem: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
 
     var body: some View {
         VStack(spacing: 2) {
-            Text(value)
+            Text(verbatim: value)
                 .fontWeight(.medium)
             Text(label)
                 .foregroundColor(.secondary)
