@@ -33,9 +33,20 @@ final class UpdaterModel: ObservableObject {
 
 struct UpdateSettingsView: View {
     @ObservedObject var updater: UpdaterModel
+    @AppStorage(SharedPreferences.autoRotateByDefaultKey, store: SharedPreferences.defaults)
+    private var autoRotateByDefault = true
 
     var body: some View {
         Form {
+            Toggle("Auto-rotate models by default", isOn: $autoRotateByDefault)
+            Text("Start 3D previews spinning automatically; you can always pause or resume inside a preview.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+                .padding(.vertical, 4)
+
             Toggle("Check for updates automatically", isOn: $updater.checksAutomatically)
             Text("Updates are verified against Preview3MF's signing key before they install.")
                 .font(.caption)

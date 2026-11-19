@@ -22,7 +22,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private var toolpathModel: ToolpathGeometry.Model?
     private var result: ParseResult?
     /// Survives paging, which swaps in a freshly built (spinning) scene.
-    private var isSpinning = true
+    private var isSpinning = SharedPreferences.autoRotateByDefault()
     /// The plate paging is heading for while its model files load; nil once it's shown.
     private var targetPlate: Int?
     private var isLoadingPlate = false
@@ -94,6 +94,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         viewControl = NSStackView(views: [spinButton])
         styleOverlay(viewControl)
         view.addSubview(viewControl)
+        applySpinState()
 
         // Right edge, under the top corner, as in the slicers' previews: drag down to see
         // the print as it stood at an earlier layer.
@@ -196,6 +197,10 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         if let scene = sceneView.scene {
             SceneBuilder.setSpinning(isSpinning, in: scene)
         }
+        applySpinState()
+    }
+
+    private func applySpinState() {
         let label = isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation")
         spinButton.image = symbolImage(isSpinning ? "pause.fill" : "play.fill",
                                        accessibilityDescription: label)
@@ -306,6 +311,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         fileGeneration += 1
         targetPlate = nil
         isLoadingPlate = false
+        isSpinning = SharedPreferences.autoRotateByDefault()
+        applySpinState()
         setViewportLoading(false)
         do {
             if GCodeParser.isGCode(url) {

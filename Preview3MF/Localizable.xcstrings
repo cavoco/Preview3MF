@@ -111,6 +111,16 @@
         }
       }
     },
+    "Auto-rotate models by default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览时默认自动旋转模型"
+          }
+        }
+      }
+    },
     "Cannot open .3mf archive" : {
       "localizations" : {
         "zh-Hans" : {
@@ -347,6 +357,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 GitHub 上点星"
+          }
+        }
+      }
+    },
+    "Start 3D previews spinning automatically; you can always pause or resume inside a preview." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 3D 预览时自动开始旋转；随时可在预览界面暂停或继续。"
           }
         }
       }
