@@ -31,6 +31,9 @@ class ThumbnailProvider: QLThumbnailProvider {
                 context.clip(to: bounds)
                 context.draw(cgImage, in: drawRect)
                 context.restoreGState()
+                if min(maximumSize.width, maximumSize.height) >= 64 {
+                    ThumbnailProvider.draw3MFBadge(in: bounds, context: context)
+                }
                 return true
             })
             handler(reply, nil)
@@ -144,5 +147,65 @@ class ThumbnailProvider: QLThumbnailProvider {
         let w = imageSize.width * scale
         let h = imageSize.height * scale
         return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
+    }
+
+    private static func draw3MFBadge(in rect: CGRect, context: CGContext) {
+        let minSide = min(rect.width, rect.height)
+        let badgeSize = round(minSide * 0.16)
+        guard badgeSize >= 10 else { return }
+
+        let margin = round(minSide * 0.05)
+        let badgeRect = CGRect(
+            x: rect.maxX - badgeSize - margin,
+            y: rect.minY + margin,
+            width: badgeSize,
+            height: badgeSize
+        )
+        let cornerRadius = badgeSize * 0.28
+        let cardPath = CGPath(
+            roundedRect: badgeRect,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+
+        context.saveGState()
+        context.setShadow(
+            offset: CGSize(width: 0, height: -max(0.5, badgeSize * 0.04)),
+            blur: max(1.5, badgeSize * 0.14),
+            color: NSColor(white: 0, alpha: 0.20).cgColor
+        )
+        context.setFillColor(NSColor(white: 0.08, alpha: 0.56).cgColor)
+        context.addPath(cardPath)
+        context.fillPath()
+        context.restoreGState()
+
+        context.saveGState()
+        context.setStrokeColor(NSColor(white: 1.0, alpha: 0.22).cgColor)
+        context.setLineWidth(max(0.5, badgeSize * 0.03))
+        context.addPath(cardPath)
+        context.strokePath()
+
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: badgeSize * 0.58, weight: .semibold)
+        guard let symbol = NSImage(systemSymbolName: "cube", accessibilityDescription: nil)?
+            .withSymbolConfiguration(symbolConfig) else {
+            context.restoreGState()
+            return
+        }
+        let inset = badgeSize * 0.18
+        let targetBox = badgeRect.insetBy(dx: inset, dy: inset)
+        var proposedRect = targetBox
+        guard let cgSymbol = symbol.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) else {
+            context.restoreGState()
+            return
+        }
+        let iconRect = aspectFit(
+            imageSize: CGSize(width: cgSymbol.width, height: cgSymbol.height),
+            in: targetBox
+        )
+        context.clip(to: iconRect, mask: cgSymbol)
+        context.setFillColor(NSColor(white: 1.0, alpha: 0.92).cgColor)
+        context.fill(iconRect)
+        context.restoreGState()
     }
 }
