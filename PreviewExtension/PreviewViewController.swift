@@ -113,7 +113,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         styleOverlay(layerControl)
         layerControl.orientation = .vertical
         layerControl.alignment = .centerX
-        layerControl.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 8, right: 6)
+        layerControl.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 10, right: 8)
+        layerControl.layer?.cornerRadius = 12
         layerControl.isHidden = true
         view.addSubview(layerControl)
 
@@ -121,24 +122,26 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             lessThanOrEqualTo: layerControl.leadingAnchor, constant: -8)
 
         NSLayoutConstraint.activate([
-            layerControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
-            layerControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
-            layerControl.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
+            layerControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            layerControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            layerControl.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
             layerControl.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
-            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
-            infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
-            infoLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -8),
+            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            infoLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+            infoLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
             plateControl.leadingAnchor.constraint(greaterThanOrEqualTo: viewControl.trailingAnchor, constant: 8),
-            plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
-            plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            plateControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            plateControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            plateControl.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
             viewportSpinner.centerXAnchor.constraint(equalTo: sceneView.centerXAnchor),
             viewportSpinner.centerYAnchor.constraint(equalTo: sceneView.centerYAnchor),
             viewportSpinner.widthAnchor.constraint(equalToConstant: 36),
             viewportSpinner.heightAnchor.constraint(equalToConstant: 36),
             plateSpinner.centerXAnchor.constraint(equalTo: viewportSpinner.centerXAnchor),
             plateSpinner.centerYAnchor.constraint(equalTo: viewportSpinner.centerYAnchor),
-            viewControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
-            viewControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            viewControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            viewControl.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            viewControl.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
         ])
 
         sceneView.onHorizontalArrow = { [weak self] delta in self?.stepPlate(delta) }
@@ -149,7 +152,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     override func viewDidLayout() {
         super.viewDidLayout()
         // A wrapping label needs to know its width up front to report the right height.
-        infoLabel.preferredMaxLayoutWidth = view.bounds.width - 16
+        infoLabel.preferredMaxLayoutWidth = view.bounds.width - 24
         if let result {
             let text = plateLabelText(result, index: targetPlate ?? result.plateIndex)
             if plateLabel.stringValue != text {
@@ -160,20 +163,31 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
     private func styleOverlay(_ stack: NSStackView) {
         stack.orientation = .horizontal
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
         stack.wantsLayer = true
-        stack.layer?.cornerRadius = 6
+        stack.layer?.cornerRadius = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
     }
 
+    private func symbolImage(_ symbol: String, accessibilityDescription label: String) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+            .withSymbolConfiguration(config) ?? NSImage()
+    }
+
     private func overlayButton(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        let button = FirstMouseButton(image: image ?? NSImage(), target: self, action: action)
+        let button = FirstMouseButton(
+            image: symbolImage(symbol, accessibilityDescription: label),
+            target: self, action: action)
         button.isBordered = false
         button.bezelStyle = .inline
         button.setAccessibilityLabel(label)
         button.toolTip = label
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 20),
+        ])
         return button
     }
 
@@ -183,8 +197,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             SceneBuilder.setSpinning(isSpinning, in: scene)
         }
         let label = isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation")
-        spinButton.image = NSImage(systemSymbolName: isSpinning ? "pause.fill" : "play.fill",
-                                   accessibilityDescription: label)
+        spinButton.image = symbolImage(isSpinning ? "pause.fill" : "play.fill",
+                                       accessibilityDescription: label)
         spinButton.setAccessibilityLabel(label)
         spinButton.toolTip = label
     }
