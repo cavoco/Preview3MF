@@ -258,17 +258,23 @@ struct PrintSettings: Equatable {
 
     /// Short phrases in reading order: "Bambu Lab P1S", "0.4 mm nozzle", "0.16 mm layers",
     /// "PLA, PETG", "15% infill", "Supports".
-    var summary: [String] {
-        var parts: [String] = []
-        if let printer { parts.append(printer) }
-        if let nozzleDiameter { parts.append(String(localized: "\(nozzleDiameter) mm nozzle")) }
-        if let layerHeight { parts.append(String(localized: "\(layerHeight) mm layers")) }
+    var summary: [String] { summaryParts(priorityFirst: false) }
+
+    var prioritizedSummary: [String] { summaryParts(priorityFirst: true) }
+
+    private func summaryParts(priorityFirst: Bool) -> [String] {
         var seen = Set<String>()
         let types = filamentTypes.filter { seen.insert($0).inserted }
-        if !types.isEmpty { parts.append(types.joined(separator: ", ")) }
-        if let infillDensity { parts.append(String(localized: "\(infillDensity) infill")) }
-        if supportsEnabled { parts.append(String(localized: "Supports")) }
-        return parts
+        let filament = types.isEmpty ? nil : types.joined(separator: ", ")
+        let layer = layerHeight.map { String(localized: "\($0) mm layers") }
+        let infill = infillDensity.map { String(localized: "\($0) infill") }
+        let supports = supportsEnabled ? String(localized: "Supports") : nil
+        let nozzle = nozzleDiameter.map { String(localized: "\($0) mm nozzle") }
+
+        if priorityFirst {
+            return [filament, layer, infill, supports, printer, nozzle].compactMap { $0 }
+        }
+        return [printer, nozzle, layer, filament, infill, supports].compactMap { $0 }
     }
 }
 
