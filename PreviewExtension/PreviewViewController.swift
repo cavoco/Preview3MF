@@ -67,7 +67,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
         infoContainer.addSubview(infoLabel)
 
-        infoExpandButton = overlayButton("chevron.up", "Show full info", #selector(toggleInfoExpanded))
+        infoExpandButton = overlayButton("chevron.up", String(localized: "Show full info"), #selector(toggleInfoExpanded))
         infoExpandButton.setContentHuggingPriority(.required, for: .horizontal)
         infoExpandButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         infoExpandButton.translatesAutoresizingMaskIntoConstraints = false
@@ -282,7 +282,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
             infoLabel.lineBreakMode = .byTruncatingTail
             infoContainer.layer?.cornerRadius = 16
         }
-        let label = isInfoExpanded ? "Collapse info" : "Show full info"
+        let label = isInfoExpanded ? String(localized: "Collapse info") : String(localized: "Show full info")
         infoExpandButton.image = NSImage(
             systemSymbolName: isInfoExpanded ? "chevron.down" : "chevron.up",
             accessibilityDescription: label)
