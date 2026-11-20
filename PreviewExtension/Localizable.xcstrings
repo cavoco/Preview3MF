@@ -141,12 +141,32 @@
         }
       }
     },
+    "by %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作者：%@"
+          }
+        }
+      }
+    },
     "Cannot open .3mf archive" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法打开 .3mf 压缩包"
+          }
+        }
+      }
+    },
+    "Collapse info" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起信息"
           }
         }
       }
@@ -231,6 +251,16 @@
         }
       }
     },
+    "Show full info" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示完整信息"
+          }
+        }
+      }
+    },
     "simplified: %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -257,16 +287,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "XML 解析失败：%@"
-          }
-        }
-      }
-    },
-    "by %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "作者：%@"
           }
         }
       }
