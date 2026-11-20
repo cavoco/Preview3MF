@@ -171,6 +171,16 @@
         }
       }
     },
+    "Hide model info" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏模型信息"
+          }
+        }
+      }
+    },
     "Layer" : {
       "localizations" : {
         "zh-Hans" : {
@@ -257,6 +267,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示完整信息"
+          }
+        }
+      }
+    },
+    "Show model info" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示模型信息"
           }
         }
       }
