@@ -6,6 +6,15 @@
         <description>Updates for Preview3MF, a Quick Look extension for .3mf files.</description>
         <language>en</language>
         <item>
+            <title>1.1.1</title>
+            <pubDate>Sat, 21 Nov 2026 12:52:10 +0000</pubDate>
+            <sparkle:version>31</sparkle:version>
+            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul><li>Add a button to show or hide the model info (#11)</li><li>Show Quick Look info as a one-line pill that expands for the full details (#14)</li><li>Badge embedded 3MF cover thumbnails with a small cube symbol (#12)</li><li>Add a setting for whether previews auto-rotate, shared through an app group (#13)</li><li>Refine overlay capsule sizing and edge padding (#8)</li><li>Show the plate loading spinner in the centre of the viewport (#10)</li><li>Use a compact plate label in narrow preview panes (#9)</li><li>Aspect-fill embedded 3MF covers when the crop is small (#7)</li><li>Translate the info summaries in place instead of keeping English copies</li><li>Add Simplified Chinese (zh-Hans) localization (#6)</li></ul>]]></description>
+            <enclosure url="https://github.com/cavoco/Preview3MF/releases/download/v1.1.1/Preview3MF-v1.1.1-universal.zip" sparkle:edSignature="AG7Xpp3ze897dVc+bRtWBJnQWxdZG1Yf1Rp9bEhLtY1UwLoBt1v3+QyHCHXFbk5GNeWm0lTFltkDiKaZN7c1Cg==" length="5347351" type="application/octet-stream"/>
+        </item>
+        <item>
             <title>1.1.0</title>
             <pubDate>Tue, 17 Nov 2026 19:19:13 +0000</pubDate>
             <sparkle:version>30</sparkle:version>
