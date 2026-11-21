@@ -260,8 +260,10 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     }
 
     @objc private func toggleInfo() {
+        // For this preview only, like pausing the spin. Quick Look's sandbox lets the
+        // extension read the shared settings but not write them, so the app owns the
+        // setting and the next file opens with whatever it says.
         showModelInfo.toggle()
-        SharedPreferences.setShowModelInfo(showModelInfo)
         applyInfoVisibility()
     }
 

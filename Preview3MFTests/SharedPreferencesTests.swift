@@ -23,10 +23,10 @@ final class SharedPreferencesTests: XCTestCase {
 
         XCTAssertTrue(SharedPreferences.showModelInfo(in: store))
 
-        SharedPreferences.setShowModelInfo(false, in: store)
+        store.set(false, forKey: SharedPreferences.showModelInfoKey)
         XCTAssertFalse(SharedPreferences.showModelInfo(in: store))
 
-        SharedPreferences.setShowModelInfo(true, in: store)
+        store.set(true, forKey: SharedPreferences.showModelInfoKey)
         XCTAssertTrue(SharedPreferences.showModelInfo(in: store))
     }
 }

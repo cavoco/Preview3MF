@@ -1,7 +1,8 @@
 import Foundation
 
 /// Preferences shared between the host app and its sandboxed Quick Look extension
-/// through the app group container.
+/// through the app group container. Only the app writes them: Quick Look's sandbox lets
+/// the extension read the app group's defaults but refuses its writes.
 enum SharedPreferences {
     static let suiteName = "XPBX8CKBGU.com.preview3mf"
     static let autoRotateByDefaultKey = "autoRotateByDefault"
@@ -23,9 +24,5 @@ enum SharedPreferences {
             return value
         }
         return true
-    }
-
-    static func setShowModelInfo(_ value: Bool, in store: UserDefaults = defaults) {
-        store.set(value, forKey: showModelInfoKey)
     }
 }
