@@ -221,6 +221,16 @@
         }
       }
     },
+    "Hide model info" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏模型信息"
+          }
+        }
+      }
+    },
     "Next plate" : {
       "localizations" : {
         "zh-Hans" : {
@@ -337,6 +347,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自动旋转"
+          }
+        }
+      }
+    },
+    "Show model info" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示模型信息"
           }
         }
       }

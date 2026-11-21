@@ -15,6 +15,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private var plateSpinner: NSProgressIndicator!
     private var viewControl: NSStackView!
     private var spinButton: NSButton!
+    private var infoButton: NSButton!
     private var layerControl: NSStackView!
     private var layerSlider: NSSlider!
     private var layerLabel: NSTextField!
@@ -28,6 +29,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
     private var result: ParseResult?
     /// Survives paging, which swaps in a freshly built (spinning) scene.
     private var isSpinning = SharedPreferences.autoRotateByDefault()
+    private var showModelInfo = SharedPreferences.showModelInfo()
     /// The plate paging is heading for while its model files load; nil once it's shown.
     private var targetPlate: Int?
     private var isLoadingPlate = false
@@ -106,10 +108,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         // Top-left, mirroring the plate control.
         spinButton = overlayButton("pause.fill", String(localized: "Pause rotation"), #selector(toggleSpin))
-        viewControl = NSStackView(views: [spinButton])
+        infoButton = overlayButton("info.circle.fill", String(localized: "Hide model info"), #selector(toggleInfo))
+        viewControl = NSStackView(views: [spinButton, infoButton])
         styleOverlay(viewControl)
         view.addSubview(viewControl)
         applySpinState()
+        applyInfoVisibility()
 
         // Right edge, under the top corner, as in the slicers' previews: drag down to see
         // the print as it stood at an earlier layer.
@@ -255,6 +259,26 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         spinButton.toolTip = label
     }
 
+    @objc private func toggleInfo() {
+        // For this preview only, like pausing the spin. Quick Look's sandbox lets the
+        // extension read the shared settings but not write them, so the app owns the
+        // setting and the next file opens with whatever it says.
+        showModelInfo.toggle()
+        applyInfoVisibility()
+    }
+
+    private func applyInfoVisibility() {
+        infoContainer.isHidden = !showModelInfo
+        let label = showModelInfo
+            ? String(localized: "Hide model info")
+            : String(localized: "Show model info")
+        infoButton.image = symbolImage(
+            showModelInfo ? "info.circle.fill" : "info.circle",
+            accessibilityDescription: label)
+        infoButton.setAccessibilityLabel(label)
+        infoButton.toolTip = label
+    }
+
     @objc private func toggleInfoExpanded() {
         isInfoExpanded.toggle()
         applyInfoExpansionState()
@@ -395,6 +419,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         isLoadingPlate = false
         isSpinning = SharedPreferences.autoRotateByDefault()
         applySpinState()
+        showModelInfo = SharedPreferences.showModelInfo()
+        applyInfoVisibility()
         setViewportLoading(false)
         isInfoExpanded = false
         applyInfoExpansionState()
@@ -444,6 +470,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         layerControl.layer?.backgroundColor = overlayBackground.cgColor
         layerLabel.textColor = foreground
         spinButton.contentTintColor = foreground
+        infoButton.contentTintColor = foreground
         infoExpandButton.contentTintColor = foreground
         return foreground
     }

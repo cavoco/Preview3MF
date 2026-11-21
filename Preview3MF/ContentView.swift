@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var isSpinning = true
     @AppStorage(SharedPreferences.autoRotateByDefaultKey, store: SharedPreferences.defaults)
     private var autoRotateByDefault = true
+    @AppStorage(SharedPreferences.showModelInfoKey, store: SharedPreferences.defaults)
+    private var showModelInfo = true
     /// The plate paging is heading for while its model files load; nil once it's shown.
     @State private var targetPlate: Int?
     @State private var isLoadingPlate = false
@@ -69,7 +71,7 @@ struct ContentView: View {
                     .frame(minHeight: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(alignment: .topLeading) {
-                        ViewControls(isSpinning: $isSpinning)
+                        ViewControls(isSpinning: $isSpinning, showInfo: $showModelInfo)
                             .padding(12)
                     }
                     .overlay(alignment: .topTrailing) {
@@ -103,7 +105,7 @@ struct ContentView: View {
                 .frame(minHeight: 300)
             }
 
-            if let result = parseResult {
+            if showModelInfo, let result = parseResult {
                 ModelInfoView(result: result)
             }
 
@@ -313,6 +315,7 @@ struct FilamentSwatch: View {
 /// Pause/resume for the auto-rotation, top-left of the scene.
 struct ViewControls: View {
     @Binding var isSpinning: Bool
+    @Binding var showInfo: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -323,6 +326,14 @@ struct ViewControls: View {
             }
             .help(isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation"))
             .accessibilityLabel(isSpinning ? String(localized: "Pause rotation") : String(localized: "Resume rotation"))
+
+            Button { showInfo.toggle() } label: {
+                Image(systemName: showInfo ? "info.circle.fill" : "info.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
+            }
+            .help(showInfo ? String(localized: "Hide model info") : String(localized: "Show model info"))
+            .accessibilityLabel(showInfo ? String(localized: "Hide model info") : String(localized: "Show model info"))
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)
