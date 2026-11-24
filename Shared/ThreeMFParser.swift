@@ -666,12 +666,14 @@ private struct Assembly {
     /// references. `visited` breaks reference cycles in malformed files.
     /// `inheritedColor` carries an object's filament colour down to the component meshes
     /// that actually hold its geometry — the slicer records the filament slot on the
-    /// container object, one level above the mesh.
+    /// container object, one level above the mesh. `partColor` is the filament the
+    /// container gave this component as one of its parts, which outranks both.
     func expand(
         _ key: ObjectKey,
         _ transform: simd_float4x4,
         _ visited: Set<ObjectKey>,
-        _ inheritedColor: SIMD4<Float>?
+        _ inheritedColor: SIMD4<Float>?,
+        partColor: SIMD4<Float>? = nil
     ) -> [BuildItem] {
         guard !visited.contains(key), visited.count < 64 else { return [] }
         // Negative parts are boolean cutting tools. They shape other geometry and are
@@ -679,7 +681,7 @@ private struct Assembly {
         // Slicer metadata names objects by bare id; Bambu keeps ids unique package-wide.
         guard !project.negativeParts.contains(key.id) else { return [] }
 
-        let color = project.color(forObject: key.id) ?? inheritedColor
+        let color = partColor ?? project.color(forObject: key.id) ?? inheritedColor
         var out: [BuildItem] = []
         if var mesh = meshes[key] {
             // Only where the model XML carried no colour of its own — the standard
@@ -695,7 +697,11 @@ private struct Assembly {
             nextVisited.insert(key)
             for reference in references {
                 // Column-vector nesting: world = parent · component (parent on the left).
-                out += expand(resolve(reference, in: key.path), transform * reference.transform, nextVisited, color)
+                // A component is one of the container's parts in the slicer's metadata, under
+                // the id it references, and may have a filament of its own there.
+                let part = project.color(forPart: reference.objectID, ofObject: key.id)
+                out += expand(resolve(reference, in: key.path), transform * reference.transform, nextVisited, color,
+                              partColor: part)
             }
         }
         return out
