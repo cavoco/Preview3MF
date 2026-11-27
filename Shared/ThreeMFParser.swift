@@ -676,10 +676,6 @@ private struct Assembly {
         partColor: SIMD4<Float>? = nil
     ) -> [BuildItem] {
         guard !visited.contains(key), visited.count < 64 else { return [] }
-        // Negative parts are boolean cutting tools. They shape other geometry and are
-        // never printed, so rendering them puts solid blocks through the model.
-        // Slicer metadata names objects by bare id; Bambu keeps ids unique package-wide.
-        guard !project.negativeParts.contains(key.id) else { return [] }
 
         let color = partColor ?? project.color(forObject: key.id) ?? inheritedColor
         var out: [BuildItem] = []
@@ -696,6 +692,10 @@ private struct Assembly {
             var nextVisited = visited
             nextVisited.insert(key)
             for reference in references {
+                // Negative parts are boolean cutting tools. They shape other geometry and
+                // are never printed, so rendering them puts solid blocks through the model.
+                // The slicer names them as parts of this container, by the id referenced.
+                if project.isNegativePart(reference.objectID, ofObject: key.id) { continue }
                 // Column-vector nesting: world = parent · component (parent on the left).
                 // A component is one of the container's parts in the slicer's metadata, under
                 // the id it references, and may have a filament of its own there.
@@ -755,8 +755,7 @@ private struct Assembly {
         var visited = Set<ObjectKey>()
 
         func walk(_ key: ObjectKey) {
-            // Negative parts aren't rendered, so their files needn't be parsed.
-            guard !project.negativeParts.contains(key.id), visited.insert(key).inserted else { return }
+            guard visited.insert(key).inserted else { return }
             guard loadedPaths.contains(key.path) else {
                 if allPaths.contains(key.path) {
                     needs.paths.insert(key.path)
@@ -768,6 +767,8 @@ private struct Assembly {
             needs.paths.insert(key.path)
             if meshes[key] != nil { needs.mayHaveGeometry = true }
             for reference in components[key] ?? [] {
+                // Negative parts aren't rendered, so their files needn't be parsed.
+                if project.isNegativePart(reference.objectID, ofObject: key.id) { continue }
                 let named = ObjectKey(path: reference.path ?? key.path, id: reference.objectID)
                 if reference.path == nil, !allLoaded, meshes[named] == nil, components[named] == nil {
                     // In another file that the reference doesn't name: only parsing

@@ -918,7 +918,7 @@ final class ThreeMFParserTests: XCTestCase {
         filamentColours: [String],
         objects: [(id: Int, extruder: Int?, components: [Int])],
         meshes: [Int],
-        negativeParts: [Int] = [],
+        negativeParts: [Int: [Int]] = [:],
         partExtruders: [Int: [Int: Int]] = [:],
         paints: [Int: [String]] = [:],
         plates: [[Int]],
@@ -970,7 +970,7 @@ final class ThreeMFParserTests: XCTestCase {
                     config += "<metadata key=\"extruder\" value=\"\(extruder)\"/>"
                 }
                 for component in object.components {
-                    let subtype = negativeParts.contains(component) ? "negative_part" : "normal_part"
+                    let subtype = negativeParts[object.id]?.contains(component) == true ? "negative_part" : "normal_part"
                     config += "<part id=\"\(component)\" subtype=\"\(subtype)\">"
                     // Parts carry their own extruder key; it must not be read as the object's.
                     let slot = partExtruders[object.id]?[component] ?? 0
@@ -1368,11 +1368,25 @@ final class ThreeMFParserTests: XCTestCase {
             filamentColours: ["#FF0000"],
             objects: [(id: 2, extruder: 1, components: [10, 11])],
             meshes: [10, 11],
-            negativeParts: [11],
+            negativeParts: [2: [11]],
             plates: [[2]]
         ))
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.totalTriangles, 1)
+    }
+
+    func testNegativePartIdsAreScopedToTheirObject() throws {
+        // Bambu Studio numbers parts per object, so a cutting tool in one object can share
+        // its id with a printed part of another, which must still render.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000"],
+            objects: [(id: 2, extruder: 1, components: [10, 11]),
+                      (id: 3, extruder: 1, components: [11])],
+            meshes: [10, 11],
+            negativeParts: [2: [11]],
+            plates: [[2, 3]]
+        ))
+        XCTAssertEqual(result.items.count, 2, "object 2's part 10 and object 3's part 11")
     }
 
     func testPlateWithNoMatchingBuildItemsIsSkipped() throws {

@@ -30,8 +30,9 @@ struct SlicerProject {
     /// The slot an object without one of its own prints with. PrusaSlicer only records an
     /// extruder an object was given, and prints the rest with the first.
     var defaultExtruder: Int?
-    /// Object ids that are subtractive — boolean cutting tools, not printed geometry.
-    var negativeParts: Set<Int> = []
+    /// Object id → ids of its parts that are subtractive — boolean cutting tools, not
+    /// printed geometry. Part ids are only unique within their object.
+    var negativeParts: [Int: Set<Int>] = [:]
     /// Build plates in file order.
     var plates: [Plate] = []
     /// The print profile the project was saved with.
@@ -70,6 +71,11 @@ struct SlicerProject {
             return nil
         }
         return filamentColors[slot - 1]
+    }
+
+    /// Whether part `partID` of `objectID` is a boolean cutting tool rather than geometry.
+    func isNegativePart(_ partID: Int, ofObject objectID: Int) -> Bool {
+        negativeParts[objectID]?.contains(partID) ?? false
     }
 
     /// The slice estimate for the plate at `position` in `plates`. Matched by plate id, not
@@ -319,7 +325,7 @@ struct PrintSettings: Equatable {
 final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
     var objectExtruder: [Int: Int] = [:]
     var partExtruder: [Int: [Int: Int]] = [:]
-    var negativeParts: Set<Int> = []
+    var negativeParts: [Int: Set<Int>] = [:]
     var plates: [SlicerProject.Plate] = []
 
     private var currentObjectID: Int?
@@ -346,8 +352,8 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
             inVolume = true
         case "part":
             currentPartID = attributes["id"].flatMap(Int.init)
-            if attributes["subtype"] == "negative_part", let id = currentPartID {
-                negativeParts.insert(id)
+            if attributes["subtype"] == "negative_part", let object = currentObjectID, let id = currentPartID {
+                negativeParts[object, default: []].insert(id)
             }
         case "plate":
             inPlate = true
