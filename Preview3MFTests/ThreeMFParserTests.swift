@@ -919,6 +919,7 @@ final class ThreeMFParserTests: XCTestCase {
         objects: [(id: Int, extruder: Int?, components: [Int])],
         meshes: [Int],
         negativeParts: [Int] = [],
+        partExtruders: [Int: [Int: Int]] = [:],
         paints: [Int: [String]] = [:],
         plates: [[Int]],
         plateNames: [String?] = [],
@@ -972,7 +973,8 @@ final class ThreeMFParserTests: XCTestCase {
                     let subtype = negativeParts.contains(component) ? "negative_part" : "normal_part"
                     config += "<part id=\"\(component)\" subtype=\"\(subtype)\">"
                     // Parts carry their own extruder key; it must not be read as the object's.
-                    config += "<metadata key=\"extruder\" value=\"0\"/>"
+                    let slot = partExtruders[object.id]?[component] ?? 0
+                    config += "<metadata key=\"extruder\" value=\"\(slot)\"/>"
                     config += "</part>"
                 }
                 config += "</object>"
@@ -1281,6 +1283,67 @@ final class ThreeMFParserTests: XCTestCase {
         // Held once per mesh, not spelled out per triangle.
         XCTAssertNil(result.items[0].mesh.triangleColors)
         XCTAssertEqual(result.items[0].mesh.uniformColor, SIMD4<Float>(1, 0, 0, 1))
+    }
+
+    func testPartFilamentColoursOutrankTheObjects() throws {
+        // One object printed in three filaments: each part names its own slot, and a part
+        // left at 0 prints with the object's.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF", "#00FF00"],
+            objects: [(id: 2, extruder: 1, components: [10, 11, 12])],
+            meshes: [10, 11, 12],
+            partExtruders: [2: [10: 0, 11: 2, 12: 3]],
+            plates: [[2]]
+        ))
+        XCTAssertEqual(result.items.map(\.mesh.uniformColor), [
+            SIMD4<Float>(1, 0, 0, 1),
+            SIMD4<Float>(0, 0, 1, 1),
+            SIMD4<Float>(0, 1, 0, 1),
+        ])
+    }
+
+    func testPartFilamentColoursApplyWhenTheObjectHasNoSlot() throws {
+        // OrcaSlicer writes extruder 0 on an object whose parts each carry a filament.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF"],
+            objects: [(id: 34, extruder: 0, components: [1, 2])],
+            meshes: [1, 2],
+            partExtruders: [34: [1: 1, 2: 2]],
+            plates: [[34]]
+        ))
+        XCTAssertEqual(result.items.map(\.mesh.uniformColor), [
+            SIMD4<Float>(1, 0, 0, 1),
+            SIMD4<Float>(0, 0, 1, 1),
+        ])
+    }
+
+    func testPartIdsAreScopedToTheirObject() throws {
+        // Bambu Studio numbers parts per object, so two objects can both have a part 10
+        // in different filaments.
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF"],
+            objects: [(id: 2, extruder: 1, components: [10]),
+                      (id: 3, extruder: 1, components: [10])],
+            meshes: [10],
+            partExtruders: [2: [10: 1], 3: [10: 2]],
+            plates: [[2, 3]]
+        ))
+        XCTAssertEqual(result.items.map(\.mesh.uniformColor), [
+            SIMD4<Float>(1, 0, 0, 1),
+            SIMD4<Float>(0, 0, 1, 1),
+        ])
+    }
+
+    func testPrintSettingsCountFilamentsGivenToParts() throws {
+        let result = try parseArchive(makeSlicerProjectArchive(
+            filamentColours: ["#FF0000", "#0000FF", "#00FF00"],
+            objects: [(id: 2, extruder: 0, components: [10, 11])],
+            meshes: [10, 11],
+            partExtruders: [2: [10: 2, 11: 3]],
+            plates: [[2]],
+            projectSettings: ["filament_type": ["PLA", "PETG", "ABS"], "enable_support": "0"]
+        ))
+        XCTAssertEqual(result.printSettings?.summary, ["PETG, ABS"])
     }
 
     func testOnlyFirstPlateIsRendered() throws {

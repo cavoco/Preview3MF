@@ -22,6 +22,11 @@ struct SlicerProject {
     var filamentColors: [SIMD4<Float>] = []
     /// Object id → 1-based extruder slot.
     var objectExtruder: [Int: Int] = [:]
+    /// Object id → part id → 1-based extruder slot, for parts given a filament of their own.
+    /// A multi-colour model is often one object whose parts each print in a different
+    /// filament; `0` means the part prints with its object's. Part ids are only unique
+    /// within their object, so they are kept per object.
+    var partExtruder: [Int: [Int: Int]] = [:]
     /// The slot an object without one of its own prints with. PrusaSlicer only records an
     /// extruder an object was given, and prints the rest with the first.
     var defaultExtruder: Int?
@@ -44,7 +49,8 @@ struct SlicerProject {
     }
 
     var isEmpty: Bool {
-        filamentColors.isEmpty && objectExtruder.isEmpty && negativeParts.isEmpty && plates.isEmpty
+        filamentColors.isEmpty && objectExtruder.isEmpty && partExtruder.isEmpty
+            && negativeParts.isEmpty && plates.isEmpty
     }
 
     /// The filament colour assigned to an object, if the slot resolves to a known filament.
@@ -52,6 +58,15 @@ struct SlicerProject {
         var slot = objectExtruder[id] ?? 0
         if slot == 0, let defaultExtruder { slot = defaultExtruder }
         guard slot >= 1, slot <= filamentColors.count else {
+            return nil
+        }
+        return filamentColors[slot - 1]
+    }
+
+    /// The filament colour a part of `objectID` was given in its own right, or nil where it
+    /// prints with its object's (slot 0, no slot recorded, or a slot outside the palette).
+    func color(forPart partID: Int, ofObject objectID: Int) -> SIMD4<Float>? {
+        guard let slot = partExtruder[objectID]?[partID], slot >= 1, slot <= filamentColors.count else {
             return nil
         }
         return filamentColors[slot - 1]
@@ -82,6 +97,7 @@ struct SlicerProject {
             parser.delegate = delegate
             if parser.parse() {
                 project.objectExtruder = delegate.objectExtruder
+                project.partExtruder = delegate.partExtruder
                 project.negativeParts = delegate.negativeParts
                 project.plates = delegate.plates
             }
@@ -98,6 +114,7 @@ struct SlicerProject {
         // with. Narrow the types to slots an object actually uses, when that is known —
         // which it is not where objects can fall back to a default slot unrecorded.
         let usedSlots = Set(project.objectExtruder.values)
+            .union(project.partExtruder.values.flatMap(\.values).filter { $0 > 0 })
         if !usedSlots.isEmpty, project.defaultExtruder == nil, project.printSettings.filamentTypes.count > 1 {
             let types = project.printSettings.filamentTypes.enumerated()
                 .filter { usedSlots.contains($0.offset + 1) }
@@ -294,13 +311,14 @@ struct PrintSettings: Equatable {
 /// </config>
 /// ```
 /// A `<part>`'s id is the 3MF object id of the mesh it refers to, which is how a negative
-/// part is matched back to geometry. Parts carry their own `extruder` key, so object-level
-/// extruder is only recorded while no part is open.
+/// part is matched back to geometry. Parts carry their own `extruder` key: read while a part
+/// is open it is that part's slot, otherwise the object's.
 ///
 /// PrusaSlicer's `Slic3r_PE_model.config` has the same `<object>` and `extruder` shape, with
 /// `<volume>` in place of `<part>` and no plates.
 final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
     var objectExtruder: [Int: Int] = [:]
+    var partExtruder: [Int: [Int: Int]] = [:]
     var negativeParts: Set<Int> = []
     var plates: [SlicerProject.Plate] = []
 
@@ -340,8 +358,12 @@ final class ModelSettingsDelegate: NSObject, XMLParserDelegate {
             inModelInstance = true
         case "metadata":
             guard let key = attributes["key"], let value = attributes["value"] else { return }
-            if key == "extruder", currentPartID == nil, !inVolume, let id = currentObjectID {
-                objectExtruder[id] = Int(value)
+            if key == "extruder", !inVolume, let id = currentObjectID {
+                if let part = currentPartID {
+                    if let slot = Int(value) { partExtruder[id, default: [:]][part] = slot }
+                } else {
+                    objectExtruder[id] = Int(value)
+                }
             }
             if key == "object_id", inPlate, inModelInstance, let id = Int(value) {
                 currentPlateObjects.append(id)
